@@ -1,6 +1,7 @@
 //! File-driven advisory planning without network or process side effects.
 use crate::placement::{self, LinkProfile, ModelProfile, PeerProfile, Placement, PlanError};
 use crate::rpc_plan::{self, RuntimeDevice};
+use crate::verification::{self, RunEvidence, VerificationError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -25,6 +26,80 @@ pub struct PlanningOutput {
     pub placement: Placement,
     /// Pass as individual process arguments, not as a shell command.
     pub server_args: Vec<String>,
+}
+
+/// Verify a saved launch plan against current model/profile inputs and evidence.
+/// This validates the proposed assignment and supplied observations, not actual
+/// runtime layer/output ownership or the authenticity of collected telemetry.
+pub fn verify_output(
+    request: &PlanningRequest,
+    output: &PlanningOutput,
+    evidence: &RunEvidence,
+    min_peers: usize,
+) -> Result<(), VerificationError> {
+    use VerificationError::{IdentityMismatch, InvalidPlan};
+    let placement = &output.placement;
+    if placement.model_hash != request.model.model_hash
+        || placement.runtime_id != request.model.runtime_id
+        || placement.context_tokens != request.model.context_tokens
+    {
+        return Err(IdentityMismatch);
+    }
+    if !output.advisory
+        || request.model.layers.is_empty()
+        || placement.assignments.last().map(|a| a.layers.end) != Some(request.model.layers.len())
+        || request.final_peer_id.as_ref().is_some_and(|id| {
+            placement
+                .assignments
+                .last()
+                .is_none_or(|a| &a.peer_id != id)
+        })
+    {
+        return Err(InvalidPlan);
+    }
+    verification::verify_run(placement, &request.peers, evidence, min_peers)?;
+    let mut devices = Vec::new();
+    for assignment in &placement.assignments {
+        let peer = request
+            .peers
+            .iter()
+            .find(|p| p.id == assignment.peer_id)
+            .ok_or(InvalidPlan)?;
+        let layers = request
+            .model
+            .layers
+            .get(assignment.layers.clone())
+            .ok_or(InvalidPlan)?;
+        let mut bytes = peer.reserved_bytes;
+        for layer in layers {
+            if layer.weight_bytes == 0 {
+                return Err(InvalidPlan);
+            }
+            bytes = layer
+                .kv_bytes_per_token
+                .checked_mul(placement.context_tokens)
+                .and_then(|kv| kv.checked_add(layer.weight_bytes))
+                .and_then(|memory| bytes.checked_add(memory))
+                .ok_or(InvalidPlan)?;
+        }
+        if bytes != assignment.estimated_bytes || bytes > peer.memory_budget_bytes {
+            return Err(InvalidPlan);
+        }
+        let mut matches = request
+            .devices
+            .iter()
+            .filter(|d| d.peer_id == assignment.peer_id);
+        devices.push(matches.next().ok_or(InvalidPlan)?.clone());
+        if matches.next().is_some() {
+            return Err(InvalidPlan);
+        }
+    }
+    let argv =
+        rpc_plan::server_args(placement, &devices, &request.model_path).map_err(|_| InvalidPlan)?;
+    if argv != output.server_args {
+        return Err(InvalidPlan);
+    }
+    Ok(())
 }
 
 pub fn build_plan(

@@ -52,6 +52,15 @@ unsuccessfully with no success output. The command validates supplied observatio
 only; it does not gather telemetry, enforce caps, authenticate evidence or stop a
 running process. The launcher must stop/replan on failure.
 
+Launcher integration should call `planning::build_plan` before launch and
+`planning::verify_output` with current profiles and fresh evidence afterward.
+The latter also checks full model coverage, model/runtime/context identity,
+the required final peer, recomputed memory estimates and exact launch argv
+against supplied device mappings. It rejects stale or edited saved plans.
+Runtime identity must include applied patches/library hashes when the base
+commit alone does not identify the executed runtime. Actual layer/output
+ownership still requires runtime allocation evidence.
+
 ## Inputs and integration
 
 1. Supply `ModelProfile`: exact model hash, pinned runtime ID, context tokens,

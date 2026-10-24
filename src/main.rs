@@ -102,13 +102,8 @@ async fn main() -> anyhow::Result<()> {
             let request: llm_cluster::planning::PlanningRequest =
                 serde_json::from_str(&std::fs::read_to_string(profile)?)?;
             let evidence = serde_json::from_str(&std::fs::read_to_string(evidence)?)?;
-            llm_cluster::verification::verify_run(
-                &output.placement,
-                &request.peers,
-                &evidence,
-                min_peers,
-            )
-            .map_err(|error| anyhow::anyhow!("verification failed: {error:?}"))?;
+            llm_cluster::planning::verify_output(&request, &output, &evidence, min_peers)
+                .map_err(|error| anyhow::anyhow!("verification failed: {error:?}"))?;
             println!("{{\"verified\":true}}");
             Ok(())
         }
