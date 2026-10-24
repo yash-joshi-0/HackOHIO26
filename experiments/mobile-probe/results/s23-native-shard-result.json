@@ -1,0 +1,1 @@
+{"passed":true,"positions":16,"reset_passed":true,"max_logit_error":0,"prefix_buffer_bytes":239933312,"suffix_buffer_bytes":695067904,"reference_buffer_bytes":930544896,"configuration":"per-model C API; no environment mutation","scope":"GLM two-layer numerical fixture, no Iroh"}

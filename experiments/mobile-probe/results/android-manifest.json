@@ -1,0 +1,21 @@
+{
+  "ndk": "28.2.13676358 (r28c)",
+  "abi": "arm64-v8a",
+  "min_android_api": 28,
+  "backend": "CPU",
+  "stl": "c++_static",
+  "cpu_arch": "armv8.2-a+dotprod+fp16",
+  "runner_sha256": "7df5955a72303f973cfbdc034dcf162df01f600f99f9a2854ab74011b8e16dc2",
+  "fixture_sha256": "a87a5df2fcb20b4beec96cb543a09df436016068bd28d4dd6f9f377ca9641f47",
+  "devices": [
+    {
+      "model": "Pixel 8a",
+      "android_api": 34
+    },
+    {
+      "model": "Galaxy S23 SM-S911U",
+      "android_api": 36
+    }
+  ],
+  "scope": "Native GLM two-layer equivalence and reset; no Iroh, APK, or persistent worker"
+}

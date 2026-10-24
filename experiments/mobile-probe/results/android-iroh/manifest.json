@@ -1,0 +1,11 @@
+{
+  "core_revision": "bc50aec",
+  "core_source_changes": false,
+  "core_sha256": "23643a5613066409cf89e3bdc0b9631128280dc1398821f19a6f8879ef5877cf",
+  "native_endpoint_sha256": "eee24c77d1c213f6a25d127affb3080f93fe44ba6636d2764fd7df2724844068",
+  "fixture_sha256": "a87a5df2fcb20b4beec96cb543a09df436016068bd28d4dd6f9f377ca9641f47",
+  "pixel8a": "16 positions over Iroh, zero max logit error; relay at connection, direct at stream closure",
+  "s23": "native test passed; Iroh discovery failed in two trials, DNS fallback requests timed out",
+  "known_issue": "Android ndk-context missing in CLI; initialize JNI/context in app before network startup",
+  "scope": "ADB-launched diagnostics, not APK or persistent worker; no USB port forwarding used for inference"
+}

@@ -1,0 +1,22 @@
+{
+  "device": "M4 iPad Pro 11-inch (physical)",
+  "test": "native C API only, no Iroh",
+  "base_commit": "71255fefc092b0344f2acddb891388814ae961be",
+  "patch_sha256": "a42150f4bb1aada8b37c255212d402c8442267721fb89d1bdcb04c920e268621",
+  "ios_minimum": "16.4",
+  "ios_sdk": "27.1",
+  "architecture": "arm64",
+  "static_llama_sha256": "03ebd3856ed75250d64978889c5a21da1f9a664419febc51950604f56755e4f2",
+  "fixture_sha256": "a87a5df2fcb20b4beec96cb543a09df436016068bd28d4dd6f9f377ca9641f47",
+  "result": {
+    "passed": true,
+    "positions": 16,
+    "reset_passed": true,
+    "max_logit_error": 0,
+    "prefix_buffer_bytes": 240753152,
+    "suffix_buffer_bytes": 695101184,
+    "reference_buffer_bytes": 931364864,
+    "configuration": "per-model C API; no environment mutation",
+    "scope": "GLM two-layer numerical fixture, no Iroh"
+  }
+}

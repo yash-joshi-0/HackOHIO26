@@ -1,0 +1,1220 @@
+Launched application with systems.stephenson.meshthing-native-probe bundle identifier.
+Waiting for the application to terminate…
+ggml_metal_device_init: tensor API disabled for pre-M5 and pre-A19 devices
+ggml_metal_library_init: using embedded metal library
+ggml_metal_library_compile_all: compiled 'fa_aux' library in 4.061 sec
+ggml_metal_library_compile_all: compiled 'fa_f16' library in 6.227 sec
+ggml_metal_library_compile_all: compiled 'fa_f32' library in 2.304 sec
+ggml_metal_library_compile_all: compiled 'fa_q4_0' library in 1.551 sec
+ggml_metal_library_compile_all: compiled 'fa_q4_1' library in 4.855 sec
+ggml_metal_library_compile_all: compiled 'fa_q5_0' library in 5.865 sec
+ggml_metal_library_compile_all: compiled 'fa_q5_1' library in 4.824 sec
+ggml_metal_library_compile_all: compiled 'fa_q8_0' library in 1.210 sec
+ggml_metal_library_compile_all: compiled 'fa_tensor' library in 5.859 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_f16' library in 4.870 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_f32' library in 5.230 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_q4_0' library in 4.061 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_q4_1' library in 5.859 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_q5_0' library in 3.455 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_q5_1' library in 7.189 sec
+ggml_metal_library_compile_all: compiled 'fa_vec_q8_0' library in 2.592 sec
+ggml_metal_library_compile_all: compiled 'mul_mv' library in 6.615 sec
+ggml_metal_library_compile_all: compiled 'mul_mv_mma' library in 4.061 sec
+ggml_metal_library_compile_all: compiled 'mul_mm' library in 1.642 sec
+ggml_metal_library_compile_all: compiled 'quantize' library in 0.713 sec
+ggml_metal_library_compile_all: compiled 'softmax' library in 4.060 sec
+ggml_metal_library_compile_all: compiled 'norm' library in 5.858 sec
+ggml_metal_library_compile_all: compiled 'unary' library in 5.857 sec
+ggml_metal_library_compile_all: compiled 'binbcast' library in 1.639 sec
+ggml_metal_library_compile_all: compiled 'reduce' library in 5.853 sec
+ggml_metal_library_compile_all: compiled 'tri' library in 5.853 sec
+ggml_metal_library_compile_all: compiled 'ssm' library in 1.636 sec
+ggml_metal_library_compile_all: compiled 'wkv' library in 5.853 sec
+ggml_metal_library_compile_all: compiled 'gated_delta_net' library in 0.265 sec
+ggml_metal_library_compile_all: compiled 'solve_tri' library in 4.055 sec
+ggml_metal_library_compile_all: compiled 'rope' library in 5.853 sec
+ggml_metal_library_compile_all: compiled 'conv' library in 4.884 sec
+ggml_metal_library_compile_all: compiled 'upscale' library in 5.853 sec
+ggml_metal_library_compile_all: compiled 'argsort' library in 4.055 sec
+ggml_metal_library_compile_all: compiled 'pool' library in 1.655 sec
+ggml_metal_library_compile_all: compiled 'misc' library in 5.851 sec
+ggml_metal_library_compile_all: loaded 36 libraries from embedded data in 7.189 sec (max single = 7.189 sec)
+ggml_metal_rsets_init: creating a residency set collection (keep_alive = 180 s)
+ggml_metal_device_init: GPU name:   MTL0 (Apple M4 GPU)
+ggml_metal_device_init: GPU family: MTLGPUFamilyApple9  (1009)
+ggml_metal_device_init: GPU family: MTLGPUFamilyMetal4  (5002)
+ggml_metal_device_init: simdgroup reduction   = true
+ggml_metal_device_init: simdgroup matrix mul. = true
+ggml_metal_device_init: has unified memory    = true
+ggml_metal_device_init: has bfloat            = true
+ggml_metal_device_init: has tensor            = false
+ggml_metal_device_init: use residency sets    = true
+ggml_metal_device_init: use shared buffers    = true
+ggml_metal_device_init: recommendedMaxWorkingSetSize  =  5726.63 MB
+llama_model_loader: loaded meta data with 60 key-value pairs and 34 tensors from /private/var/containers/Bundle/Application/D4E25AC7-6742-4F76-8975-E39885E0AC2B/MeshThingProbe.app/GLM-4.7-Flash-two-layer-fixture.gguf (version GGUF V3 (latest))
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = deepseek2
+llama_model_loader: - kv   1:                               general.type str              = model
+llama_model_loader: - kv   2:                     general.sampling.top_p f32              = 0.950000
+llama_model_loader: - kv   3:                      general.sampling.temp f32              = 1.000000
+llama_model_loader: - kv   4:                               general.name str              = Glm-4.7-Flash
+llama_model_loader: - kv   5:                           general.basename str              = Glm-4.7-Flash
+llama_model_loader: - kv   6:                       general.quantized_by str              = Unsloth
+llama_model_loader: - kv   7:                         general.size_label str              = 64x2.6B
+llama_model_loader: - kv   8:                            general.license str              = mit
+llama_model_loader: - kv   9:                           general.repo_url str              = https://huggingface.co/unsloth
+llama_model_loader: - kv  10:                   general.base_model.count u32              = 1
+llama_model_loader: - kv  11:                  general.base_model.0.name str              = GLM 4.7 Flash
+llama_model_loader: - kv  12:          general.base_model.0.organization str              = Zai Org
+llama_model_loader: - kv  13:              general.base_model.0.repo_url str              = https://huggingface.co/zai-org/GLM-4....
+llama_model_loader: - kv  14:                               general.tags arr[str,2]       = ["unsloth", "text-generation"]
+llama_model_loader: - kv  15:                          general.languages arr[str,2]       = ["en", "zh"]
+llama_model_loader: - kv  16:                      deepseek2.block_count u32              = 2
+llama_model_loader: - kv  17:                   deepseek2.context_length u32              = 202752
+llama_model_loader: - kv  18:                 deepseek2.embedding_length u32              = 2048
+llama_model_loader: - kv  19:              deepseek2.feed_forward_length u32              = 10240
+llama_model_loader: - kv  20:             deepseek2.attention.head_count u32              = 20
+llama_model_loader: - kv  21:          deepseek2.attention.head_count_kv u32              = 1
+llama_model_loader: - kv  22:                   deepseek2.rope.freq_base f32              = 1000000.000000
+llama_model_loader: - kv  23: deepseek2.attention.layer_norm_rms_epsilon f32              = 0.000010
+llama_model_loader: - kv  24:                deepseek2.expert_used_count u32              = 4
+llama_model_loader: - kv  25:               deepseek2.expert_group_count u32              = 1
+llama_model_loader: - kv  26:          deepseek2.expert_group_used_count u32              = 1
+llama_model_loader: - kv  27:               deepseek2.expert_gating_func u32              = 2
+llama_model_loader: - kv  28:        deepseek2.leading_dense_block_count u32              = 1
+llama_model_loader: - kv  29:                       deepseek2.vocab_size u32              = 154880
+llama_model_loader: - kv  30:            deepseek2.attention.q_lora_rank u32              = 768
+llama_model_loader: - kv  31:           deepseek2.attention.kv_lora_rank u32              = 512
+llama_model_loader: - kv  32:             deepseek2.attention.key_length u32              = 576
+llama_model_loader: - kv  33:           deepseek2.attention.value_length u32              = 512
+llama_model_loader: - kv  34:         deepseek2.attention.key_length_mla u32              = 256
+llama_model_loader: - kv  35:       deepseek2.attention.value_length_mla u32              = 256
+llama_model_loader: - kv  36:       deepseek2.expert_feed_forward_length u32              = 1536
+llama_model_loader: - kv  37:                     deepseek2.expert_count u32              = 64
+llama_model_loader: - kv  38:              deepseek2.expert_shared_count u32              = 1
+llama_model_loader: - kv  39:             deepseek2.expert_weights_scale f32              = 1.800000
+llama_model_loader: - kv  40:              deepseek2.expert_weights_norm bool             = true
+llama_model_loader: - kv  41:             deepseek2.rope.dimension_count u32              = 64
+llama_model_loader: - kv  42:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  43:                         tokenizer.ggml.pre str              = glm4
+llama_model_loader: - kv  44:                      tokenizer.ggml.tokens arr[str,154880]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  45:                  tokenizer.ggml.token_type arr[i32,154880]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  46:                      tokenizer.ggml.merges arr[str,321649]  = ["Ġ Ġ", "Ġ ĠĠĠ", "ĠĠ ĠĠ", "...
+llama_model_loader: - kv  47:                tokenizer.ggml.eos_token_id u32              = 154820
+llama_model_loader: - kv  48:            tokenizer.ggml.padding_token_id u32              = 154821
+llama_model_loader: - kv  49:                tokenizer.ggml.bos_token_id u32              = 154822
+llama_model_loader: - kv  50:                tokenizer.ggml.eot_token_id u32              = 154827
+llama_model_loader: - kv  51:            tokenizer.ggml.unknown_token_id u32              = 154820
+llama_model_loader: - kv  52:                tokenizer.ggml.eom_token_id u32              = 154829
+llama_model_loader: - kv  53:                    tokenizer.chat_template str              = [gMASK]<sop>\n{%- if tools -%}\n<|syste...
+llama_model_loader: - kv  54:               general.quantization_version u32              = 2
+llama_model_loader: - kv  55:                          general.file_type u32              = 15
+llama_model_loader: - kv  56:                      quantize.imatrix.file str              = GLM-4.7-Flash-GGUF/imatrix_unsloth.gguf
+llama_model_loader: - kv  57:                   quantize.imatrix.dataset str              = unsloth_calibration_GLM-4.7-Flash.txt
+llama_model_loader: - kv  58:             quantize.imatrix.entries_count u32              = 607
+llama_model_loader: - kv  59:              quantize.imatrix.chunks_count u32              = 85
+llama_model_loader: - type  f32:   11 tensors
+llama_model_loader: - type q8_0:    6 tensors
+llama_model_loader: - type q4_K:   11 tensors
+llama_model_loader: - type q5_K:    2 tensors
+llama_model_loader: - type q6_K:    4 tensors
+print_info: file format = GGUF V3 (latest)
+print_info: file type   = Q4_K - Medium
+print_info: file size   = 866.69 MiB (5.37 BPW) 
+llama_prepare_model_devices: using device MTL0 (Apple M4 GPU) (unknown id) - 5460 MiB free
+init_tokenizer: initializing tokenizer for type 2
+load: 0 unused tokens
+load: control token: 154854 '<|image|>' is not marked as EOG
+load: control token: 154853 '<|end_of_box|>' is not marked as EOG
+load: control token: 154852 '<|begin_of_box|>' is not marked as EOG
+load: control token: 154840 '<|code_suffix|>' is not marked as EOG
+load: control token: 154839 '<|code_middle|>' is not marked as EOG
+load: control token: 154838 '<|code_prefix|>' is not marked as EOG
+load: control token: 154831 '<|end_of_image|>' is not marked as EOG
+load: control token: 154828 '<|assistant|>' is not marked as EOG
+load: control token: 154827 '<|user|>' is not marked as EOG
+load: control token: 154835 '<|end_of_audio|>' is not marked as EOG
+load: control token: 154832 '<|begin_of_video|>' is not marked as EOG
+load: control token: 154837 '<|end_of_transcription|>' is not marked as EOG
+load: control token: 154824 '<sop>' is not marked as EOG
+load: control token: 154825 '<eop>' is not marked as EOG
+load: control token: 154834 '<|begin_of_audio|>' is not marked as EOG
+load: control token: 154823 '[sMASK]' is not marked as EOG
+load: control token: 154833 '<|end_of_video|>' is not marked as EOG
+load: control token: 154855 '<|video|>' is not marked as EOG
+load: control token: 154836 '<|begin_of_transcription|>' is not marked as EOG
+load: control token: 154826 '<|system|>' is not marked as EOG
+load: control token: 154829 '<|observation|>' is not marked as EOG
+load: control token: 154821 '[MASK]' is not marked as EOG
+load: control token: 154830 '<|begin_of_image|>' is not marked as EOG
+load: control token: 154822 '[gMASK]' is not marked as EOG
+load: special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect
+load: special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect
+load: printing all EOG tokens:
+load:   - 154820 ('<|endoftext|>')
+load:   - 154827 ('<|user|>')
+load:   - 154829 ('<|observation|>')
+load: special tokens cache size = 36
+load: token to piece cache size = 0.9811 MB
+print_info: arch                  = deepseek2
+print_info: vocab_only            = 0
+print_info: no_alloc              = 0
+print_info: n_ctx_train           = 202752
+print_info: n_embd_inp            = 2048
+print_info: n_embd                = 2048
+print_info: n_embd_out            = 2048
+print_info: n_layer               = 2
+print_info: n_layer_all           = 2
+print_info: n_head                = 20
+print_info: n_head_kv             = 1
+print_info: n_rot                 = 64
+print_info: n_swa                 = 0
+print_info: is_swa_any            = 0
+print_info: non_causal_type       = 0
+print_info: n_embd_head_k         = 576
+print_info: n_embd_head_v         = 512
+print_info: n_gqa                 = 20
+print_info: n_embd_k_gqa          = 576
+print_info: n_embd_v_gqa          = 512
+print_info: f_norm_eps            = 0.0e+00
+print_info: f_norm_rms_eps        = 1.0e-05
+print_info: f_clamp_kqv           = 0.0e+00
+print_info: f_max_alibi_bias      = 0.0e+00
+print_info: f_logit_scale         = 0.0e+00
+print_info: f_attn_scale          = 0.0e+00
+print_info: f_attn_value_scale    = 0.0000
+print_info: n_ff                  = 10240
+print_info: n_expert              = 64
+print_info: n_expert_used         = 4
+print_info: n_expert_groups       = 1
+print_info: n_group_used          = 1
+print_info: causal attn           = 1
+print_info: pooling type          = -1
+print_info: rope type             = 0
+print_info: rope scaling          = linear
+print_info: freq_base_train       = 1000000.0
+print_info: freq_scale_train      = 1
+print_info: n_ctx_orig_yarn       = 202752
+print_info: rope_yarn_log_mul     = 0.0000
+print_info: rope_finetuned        = unknown
+print_info: model type            = ?B
+print_info: model params          = 1.35 B
+print_info: general.name          = Glm-4.7-Flash
+print_info: n_layer_dense_lead    = 1
+print_info: n_lora_q              = 768
+print_info: n_lora_kv             = 512
+print_info: n_embd_head_k_mla     = 256
+print_info: n_embd_head_v_mla     = 256
+print_info: n_ff_exp              = 1536
+print_info: n_expert_shared       = 1
+print_info: expert_weights_scale  = 1.8
+print_info: expert_weights_norm   = 1
+print_info: expert_gating_func    = sigmoid
+print_info: vocab type            = BPE
+print_info: n_vocab               = 154880
+print_info: n_merges              = 321649
+print_info: BOS token             = 154822 '[gMASK]'
+print_info: EOS token             = 154820 '<|endoftext|>'
+print_info: EOT token             = 154827 '<|user|>'
+print_info: EOM token             = 154829 '<|observation|>'
+print_info: UNK token             = 154820 '<|endoftext|>'
+print_info: PAD token             = 154821 '[MASK]'
+print_info: LF token              = 198 'Ċ'
+print_info: FIM PRE token         = 154838 '<|code_prefix|>'
+print_info: FIM SUF token         = 154840 '<|code_suffix|>'
+print_info: FIM MID token         = 154839 '<|code_middle|>'
+print_info: EOG token             = 154820 '<|endoftext|>'
+print_info: EOG token             = 154827 '<|user|>'
+print_info: EOG token             = 154829 '<|observation|>'
+print_info: max token length      = 1024
+mesh shard: layers [0, 2) of 2
+load_tensors: loading model tensors, this can take a while... (load_mode = none)
+load_tensors: layer   0 assigned to device MTL0, is_swa = 0
+load_tensors: layer   1 assigned to device MTL0, is_swa = 0
+load_tensors: layer   2 assigned to device MTL0, is_swa = 0
+create_tensor: loading tensor token_embd.weight
+create_tensor: loading tensor output_norm.weight
+create_tensor: loading tensor output.weight
+create_tensor: loading tensor blk.0.attn_norm.weight
+create_tensor: loading tensor blk.0.attn_q_a_norm.weight
+create_tensor: loading tensor blk.0.attn_kv_a_norm.weight
+create_tensor: loading tensor blk.0.attn_q_a.weight
+create_tensor: loading tensor blk.0.attn_q_b.weight
+create_tensor: loading tensor blk.0.attn_kv_a_mqa.weight
+create_tensor: loading tensor blk.0.attn_k_b.weight
+create_tensor: loading tensor blk.0.attn_v_b.weight
+create_tensor: loading tensor blk.0.attn_output.weight
+create_tensor: loading tensor blk.0.ffn_norm.weight
+create_tensor: loading tensor blk.0.ffn_gate.weight
+create_tensor: loading tensor blk.0.ffn_down.weight
+create_tensor: loading tensor blk.0.ffn_up.weight
+create_tensor: loading tensor blk.1.attn_norm.weight
+create_tensor: loading tensor blk.1.attn_q_a_norm.weight
+create_tensor: loading tensor blk.1.attn_kv_a_norm.weight
+create_tensor: loading tensor blk.1.attn_q_a.weight
+create_tensor: loading tensor blk.1.attn_q_b.weight
+create_tensor: loading tensor blk.1.attn_kv_a_mqa.weight
+create_tensor: loading tensor blk.1.attn_k_b.weight
+create_tensor: loading tensor blk.1.attn_v_b.weight
+create_tensor: loading tensor blk.1.attn_output.weight
+create_tensor: loading tensor blk.1.ffn_norm.weight
+create_tensor: loading tensor blk.1.ffn_gate_inp.weight
+create_tensor: loading tensor blk.1.exp_probs_b.bias
+create_tensor: loading tensor blk.1.ffn_down_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_up_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_exps.weight
+create_tensor: loading tensor blk.1.ffn_up_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_shexp.weight
+create_tensor: loading tensor blk.1.ffn_down_shexp.weight
+create_tensor: loading tensor blk.1.ffn_up_shexp.weight
+create_tensor: loading tensor blk.0.attn_output.scale
+create_tensor: loading tensor blk.0.ffn_gate.scale
+create_tensor: loading tensor blk.0.ffn_down.scale
+create_tensor: loading tensor blk.0.ffn_up.scale
+create_tensor: loading tensor blk.0.attn_output.input_scale
+create_tensor: loading tensor blk.0.ffn_gate.input_scale
+create_tensor: loading tensor blk.0.ffn_down.input_scale
+create_tensor: loading tensor blk.0.ffn_up.input_scale
+create_tensor: loading tensor blk.1.attn_output.scale
+create_tensor: loading tensor blk.1.ffn_gate_shexp.scale
+create_tensor: loading tensor blk.1.ffn_down_shexp.scale
+create_tensor: loading tensor blk.1.ffn_up_shexp.scale
+create_tensor: loading tensor blk.1.ffn_gate_exps.scale
+create_tensor: loading tensor blk.1.ffn_down_exps.scale
+create_tensor: loading tensor blk.1.ffn_up_exps.scale
+create_tensor: loading tensor blk.1.attn_output.input_scale
+create_tensor: loading tensor blk.1.ffn_gate_exps.input_scale
+create_tensor: loading tensor blk.1.ffn_down_exps.input_scale
+create_tensor: loading tensor blk.1.ffn_up_exps.input_scale
+create_tensor: loading tensor blk.1.ffn_gate_shexp.input_scale
+create_tensor: loading tensor blk.1.ffn_down_shexp.input_scale
+create_tensor: loading tensor blk.1.ffn_up_shexp.input_scale
+done_getting_tensors: tensor 'token_embd.weight' (q4_K) (and 0 others) cannot be used with preferred buffer type CPU_REPACK, using CPU instead
+load_tensors: offloading output layer to GPU
+load_tensors: offloading 1 repeating layers to GPU
+load_tensors: offloaded 3/3 layers to GPU
+load_tensors:          CPU model buffer size =   170.16 MiB
+load_tensors:         MTL0 model buffer size =   696.53 MiB
+load_all_data: device MTL0 does not support async, host buffers or events
+...........load_all_data: no device found for buffer type CPU for async uploads
+.
+llama_init_from_model: model default pooling_type is [-1], but [0] was specified
+llama_context: constructing llama_context
+llama_context: n_seq_max             = 1
+llama_context: n_ctx                 = 256
+llama_context: n_ctx_seq             = 256
+llama_context: n_batch               = 32
+llama_context: n_ubatch              = 32
+llama_context: causal_attn           = 1
+llama_context: flash_attn            = disabled
+llama_context: kv_unified            = false
+llama_context: freq_base             = 1000000.0
+llama_context: freq_scale            = 1
+llama_context: n_rs_seq              = 0
+llama_context: n_outputs_max         = 32
+llama_context: n_outputs_max_per_seq = 1
+llama_context: n_ctx_seq (256) < n_ctx_train (202752) -- the full capacity of the model will not be utilized
+ggml_metal_init: allocating
+ggml_metal_init: picking default device: Apple M4 GPU
+ggml_metal_init: use fusion         = true
+ggml_metal_init: use concurrency    = true
+ggml_metal_init: use graph optimize = true
+set_abort_callback: call
+llama_context:        CPU  output buffer size =     0.59 MiB
+llama_kv_cache: layer   0: dev = MTL0
+llama_kv_cache: layer   1: dev = MTL0
+llama_kv_cache:       MTL0 KV buffer size =     0.56 MiB
+llama_kv_cache: size =    0.56 MiB (   256 cells,   2 layers,  1/1 seqs), K (f16):    0.56 MiB, V (f16):    0.00 MiB
+llama_kv_cache: n_rot_k = 0, n_embd_head_k_all = 576
+llama_kv_cache: n_rot_v = 0, n_embd_head_k_all = 0
+llama_context: enumerating backends
+llama_context: backend_ptrs.size() = 3
+sched_reserve: reserving ...
+sched_reserve: max_nodes = 1024
+sched_reserve: reserving full memory module
+sched_reserve: worst-case: n_tokens = 32, n_seqs = 1, n_outputs = 1
+resolve_fused_ops: resolving fused DeepSeek V4 HC support:
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_90' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_91' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC pre enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_90' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_91' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC comb enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_90' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_91' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC post enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =   32, n_seqs =  1, n_outputs =   32
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_90' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_91' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {    32,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_90' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_91' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+graph_reserve: reserving a graph for ubatch with n_tokens =   32, n_seqs =  1, n_outputs =   32
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_90' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_91' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {    32,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+sched_reserve:       MTL0 compute buffer size =    19.94 MiB
+sched_reserve:        CPU compute buffer size =     1.03 MiB
+sched_reserve: graph: nodes = 130, splits = 2, input objects = 4, input tensors = 8
+sched_reserve: reserve took 2.18 ms, sched copies = 1
+llama_model_loader: loaded meta data with 60 key-value pairs and 34 tensors from /private/var/containers/Bundle/Application/D4E25AC7-6742-4F76-8975-E39885E0AC2B/MeshThingProbe.app/GLM-4.7-Flash-two-layer-fixture.gguf (version GGUF V3 (latest))
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = deepseek2
+llama_model_loader: - kv   1:                               general.type str              = model
+llama_model_loader: - kv   2:                     general.sampling.top_p f32              = 0.950000
+llama_model_loader: - kv   3:                      general.sampling.temp f32              = 1.000000
+llama_model_loader: - kv   4:                               general.name str              = Glm-4.7-Flash
+llama_model_loader: - kv   5:                           general.basename str              = Glm-4.7-Flash
+llama_model_loader: - kv   6:                       general.quantized_by str              = Unsloth
+llama_model_loader: - kv   7:                         general.size_label str              = 64x2.6B
+llama_model_loader: - kv   8:                            general.license str              = mit
+llama_model_loader: - kv   9:                           general.repo_url str              = https://huggingface.co/unsloth
+llama_model_loader: - kv  10:                   general.base_model.count u32              = 1
+llama_model_loader: - kv  11:                  general.base_model.0.name str              = GLM 4.7 Flash
+llama_model_loader: - kv  12:          general.base_model.0.organization str              = Zai Org
+llama_model_loader: - kv  13:              general.base_model.0.repo_url str              = https://huggingface.co/zai-org/GLM-4....
+llama_model_loader: - kv  14:                               general.tags arr[str,2]       = ["unsloth", "text-generation"]
+llama_model_loader: - kv  15:                          general.languages arr[str,2]       = ["en", "zh"]
+llama_model_loader: - kv  16:                      deepseek2.block_count u32              = 2
+llama_model_loader: - kv  17:                   deepseek2.context_length u32              = 202752
+llama_model_loader: - kv  18:                 deepseek2.embedding_length u32              = 2048
+llama_model_loader: - kv  19:              deepseek2.feed_forward_length u32              = 10240
+llama_model_loader: - kv  20:             deepseek2.attention.head_count u32              = 20
+llama_model_loader: - kv  21:          deepseek2.attention.head_count_kv u32              = 1
+llama_model_loader: - kv  22:                   deepseek2.rope.freq_base f32              = 1000000.000000
+llama_model_loader: - kv  23: deepseek2.attention.layer_norm_rms_epsilon f32              = 0.000010
+llama_model_loader: - kv  24:                deepseek2.expert_used_count u32              = 4
+llama_model_loader: - kv  25:               deepseek2.expert_group_count u32              = 1
+llama_model_loader: - kv  26:          deepseek2.expert_group_used_count u32              = 1
+llama_model_loader: - kv  27:               deepseek2.expert_gating_func u32              = 2
+llama_model_loader: - kv  28:        deepseek2.leading_dense_block_count u32              = 1
+llama_model_loader: - kv  29:                       deepseek2.vocab_size u32              = 154880
+llama_model_loader: - kv  30:            deepseek2.attention.q_lora_rank u32              = 768
+llama_model_loader: - kv  31:           deepseek2.attention.kv_lora_rank u32              = 512
+llama_model_loader: - kv  32:             deepseek2.attention.key_length u32              = 576
+llama_model_loader: - kv  33:           deepseek2.attention.value_length u32              = 512
+llama_model_loader: - kv  34:         deepseek2.attention.key_length_mla u32              = 256
+llama_model_loader: - kv  35:       deepseek2.attention.value_length_mla u32              = 256
+llama_model_loader: - kv  36:       deepseek2.expert_feed_forward_length u32              = 1536
+llama_model_loader: - kv  37:                     deepseek2.expert_count u32              = 64
+llama_model_loader: - kv  38:              deepseek2.expert_shared_count u32              = 1
+llama_model_loader: - kv  39:             deepseek2.expert_weights_scale f32              = 1.800000
+llama_model_loader: - kv  40:              deepseek2.expert_weights_norm bool             = true
+llama_model_loader: - kv  41:             deepseek2.rope.dimension_count u32              = 64
+llama_model_loader: - kv  42:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  43:                         tokenizer.ggml.pre str              = glm4
+llama_model_loader: - kv  44:                      tokenizer.ggml.tokens arr[str,154880]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  45:                  tokenizer.ggml.token_type arr[i32,154880]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  46:                      tokenizer.ggml.merges arr[str,321649]  = ["Ġ Ġ", "Ġ ĠĠĠ", "ĠĠ ĠĠ", "...
+llama_model_loader: - kv  47:                tokenizer.ggml.eos_token_id u32              = 154820
+llama_model_loader: - kv  48:            tokenizer.ggml.padding_token_id u32              = 154821
+llama_model_loader: - kv  49:                tokenizer.ggml.bos_token_id u32              = 154822
+llama_model_loader: - kv  50:                tokenizer.ggml.eot_token_id u32              = 154827
+llama_model_loader: - kv  51:            tokenizer.ggml.unknown_token_id u32              = 154820
+llama_model_loader: - kv  52:                tokenizer.ggml.eom_token_id u32              = 154829
+llama_model_loader: - kv  53:                    tokenizer.chat_template str              = [gMASK]<sop>\n{%- if tools -%}\n<|syste...
+llama_model_loader: - kv  54:               general.quantization_version u32              = 2
+llama_model_loader: - kv  55:                          general.file_type u32              = 15
+llama_model_loader: - kv  56:                      quantize.imatrix.file str              = GLM-4.7-Flash-GGUF/imatrix_unsloth.gguf
+llama_model_loader: - kv  57:                   quantize.imatrix.dataset str              = unsloth_calibration_GLM-4.7-Flash.txt
+llama_model_loader: - kv  58:             quantize.imatrix.entries_count u32              = 607
+llama_model_loader: - kv  59:              quantize.imatrix.chunks_count u32              = 85
+llama_model_loader: - type  f32:   11 tensors
+llama_model_loader: - type q8_0:    6 tensors
+llama_model_loader: - type q4_K:   11 tensors
+llama_model_loader: - type q5_K:    2 tensors
+llama_model_loader: - type q6_K:    4 tensors
+print_info: file format = GGUF V3 (latest)
+print_info: file type   = Q4_K - Medium
+print_info: file size   = 866.69 MiB (5.37 BPW) 
+llama_prepare_model_devices: using device MTL0 (Apple M4 GPU) (unknown id) - 4743 MiB free
+init_tokenizer: initializing tokenizer for type 2
+load: 0 unused tokens
+load: control token: 154854 '<|image|>' is not marked as EOG
+load: control token: 154853 '<|end_of_box|>' is not marked as EOG
+load: control token: 154852 '<|begin_of_box|>' is not marked as EOG
+load: control token: 154840 '<|code_suffix|>' is not marked as EOG
+load: control token: 154839 '<|code_middle|>' is not marked as EOG
+load: control token: 154838 '<|code_prefix|>' is not marked as EOG
+load: control token: 154831 '<|end_of_image|>' is not marked as EOG
+load: control token: 154828 '<|assistant|>' is not marked as EOG
+load: control token: 154827 '<|user|>' is not marked as EOG
+load: control token: 154835 '<|end_of_audio|>' is not marked as EOG
+load: control token: 154832 '<|begin_of_video|>' is not marked as EOG
+load: control token: 154837 '<|end_of_transcription|>' is not marked as EOG
+load: control token: 154824 '<sop>' is not marked as EOG
+load: control token: 154825 '<eop>' is not marked as EOG
+load: control token: 154834 '<|begin_of_audio|>' is not marked as EOG
+load: control token: 154823 '[sMASK]' is not marked as EOG
+load: control token: 154833 '<|end_of_video|>' is not marked as EOG
+load: control token: 154855 '<|video|>' is not marked as EOG
+load: control token: 154836 '<|begin_of_transcription|>' is not marked as EOG
+load: control token: 154826 '<|system|>' is not marked as EOG
+load: control token: 154829 '<|observation|>' is not marked as EOG
+load: control token: 154821 '[MASK]' is not marked as EOG
+load: control token: 154830 '<|begin_of_image|>' is not marked as EOG
+load: control token: 154822 '[gMASK]' is not marked as EOG
+load: special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect
+load: special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect
+load: printing all EOG tokens:
+load:   - 154820 ('<|endoftext|>')
+load:   - 154827 ('<|user|>')
+load:   - 154829 ('<|observation|>')
+load: special tokens cache size = 36
+load: token to piece cache size = 0.9811 MB
+print_info: arch                  = deepseek2
+print_info: vocab_only            = 0
+print_info: no_alloc              = 0
+print_info: n_ctx_train           = 202752
+print_info: n_embd_inp            = 2048
+print_info: n_embd                = 2048
+print_info: n_embd_out            = 2048
+print_info: n_layer               = 2
+print_info: n_layer_all           = 2
+print_info: n_head                = 20
+print_info: n_head_kv             = 1
+print_info: n_rot                 = 64
+print_info: n_swa                 = 0
+print_info: is_swa_any            = 0
+print_info: non_causal_type       = 0
+print_info: n_embd_head_k         = 576
+print_info: n_embd_head_v         = 512
+print_info: n_gqa                 = 20
+print_info: n_embd_k_gqa          = 576
+print_info: n_embd_v_gqa          = 512
+print_info: f_norm_eps            = 0.0e+00
+print_info: f_norm_rms_eps        = 1.0e-05
+print_info: f_clamp_kqv           = 0.0e+00
+print_info: f_max_alibi_bias      = 0.0e+00
+print_info: f_logit_scale         = 0.0e+00
+print_info: f_attn_scale          = 0.0e+00
+print_info: f_attn_value_scale    = 0.0000
+print_info: n_ff                  = 10240
+print_info: n_expert              = 64
+print_info: n_expert_used         = 4
+print_info: n_expert_groups       = 1
+print_info: n_group_used          = 1
+print_info: causal attn           = 1
+print_info: pooling type          = -1
+print_info: rope type             = 0
+print_info: rope scaling          = linear
+print_info: freq_base_train       = 1000000.0
+print_info: freq_scale_train      = 1
+print_info: n_ctx_orig_yarn       = 202752
+print_info: rope_yarn_log_mul     = 0.0000
+print_info: rope_finetuned        = unknown
+print_info: model type            = ?B
+print_info: model params          = 1.35 B
+print_info: general.name          = Glm-4.7-Flash
+print_info: n_layer_dense_lead    = 1
+print_info: n_lora_q              = 768
+print_info: n_lora_kv             = 512
+print_info: n_embd_head_k_mla     = 256
+print_info: n_embd_head_v_mla     = 256
+print_info: n_ff_exp              = 1536
+print_info: n_expert_shared       = 1
+print_info: expert_weights_scale  = 1.8
+print_info: expert_weights_norm   = 1
+print_info: expert_gating_func    = sigmoid
+print_info: vocab type            = BPE
+print_info: n_vocab               = 154880
+print_info: n_merges              = 321649
+print_info: BOS token             = 154822 '[gMASK]'
+print_info: EOS token             = 154820 '<|endoftext|>'
+print_info: EOT token             = 154827 '<|user|>'
+print_info: EOM token             = 154829 '<|observation|>'
+print_info: UNK token             = 154820 '<|endoftext|>'
+print_info: PAD token             = 154821 '[MASK]'
+print_info: LF token              = 198 'Ċ'
+print_info: FIM PRE token         = 154838 '<|code_prefix|>'
+print_info: FIM SUF token         = 154840 '<|code_suffix|>'
+print_info: FIM MID token         = 154839 '<|code_middle|>'
+print_info: EOG token             = 154820 '<|endoftext|>'
+print_info: EOG token             = 154827 '<|user|>'
+print_info: EOG token             = 154829 '<|observation|>'
+print_info: max token length      = 1024
+mesh shard: layers [0, 1) of 2
+load_tensors: loading model tensors, this can take a while... (load_mode = none)
+load_tensors: layer   0 assigned to device MTL0, is_swa = 0
+load_tensors: layer   1 assigned to device MTL0, is_swa = 0
+load_tensors: layer   2 assigned to device MTL0, is_swa = 0
+create_tensor: loading tensor token_embd.weight
+create_tensor: loading tensor output_norm.weight
+model has unused tensor output_norm.weight (size = 8192 bytes) -- ignoring
+create_tensor: loading tensor output.weight
+model has unused tensor output.weight (size = 260198400 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_norm.weight
+create_tensor: loading tensor blk.0.attn_q_a_norm.weight
+create_tensor: loading tensor blk.0.attn_kv_a_norm.weight
+create_tensor: loading tensor blk.0.attn_q_a.weight
+create_tensor: loading tensor blk.0.attn_q_b.weight
+create_tensor: loading tensor blk.0.attn_kv_a_mqa.weight
+create_tensor: loading tensor blk.0.attn_k_b.weight
+create_tensor: loading tensor blk.0.attn_v_b.weight
+create_tensor: loading tensor blk.0.attn_output.weight
+create_tensor: loading tensor blk.0.ffn_norm.weight
+create_tensor: loading tensor blk.0.ffn_gate.weight
+create_tensor: loading tensor blk.0.ffn_down.weight
+create_tensor: loading tensor blk.0.ffn_up.weight
+create_tensor: loading tensor blk.1.attn_norm.weight
+model has unused tensor blk.1.attn_norm.weight (size = 8192 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_q_a_norm.weight
+model has unused tensor blk.1.attn_q_a_norm.weight (size = 3072 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_kv_a_norm.weight
+model has unused tensor blk.1.attn_kv_a_norm.weight (size = 2048 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_q_a.weight
+model has unused tensor blk.1.attn_q_a.weight (size = 884736 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_q_b.weight
+model has unused tensor blk.1.attn_q_b.weight (size = 2211840 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_kv_a_mqa.weight
+model has unused tensor blk.1.attn_kv_a_mqa.weight (size = 1253376 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_k_b.weight
+model has unused tensor blk.1.attn_k_b.weight (size = 2088960 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_v_b.weight
+model has unused tensor blk.1.attn_v_b.weight (size = 2785280 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_output.weight
+model has unused tensor blk.1.attn_output.weight (size = 5898240 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_norm.weight
+model has unused tensor blk.1.ffn_norm.weight (size = 8192 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_gate_inp.weight
+model has unused tensor blk.1.ffn_gate_inp.weight (size = 524288 bytes) -- ignoring
+create_tensor: loading tensor blk.1.exp_probs_b.bias
+model has unused tensor blk.1.exp_probs_b.bias (size = 256 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_down_exps.weight
+model has unused tensor blk.1.ffn_down_exps.weight (size = 165150720 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_gate_up_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_exps.weight
+model has unused tensor blk.1.ffn_gate_exps.weight (size = 113246208 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_up_exps.weight
+model has unused tensor blk.1.ffn_up_exps.weight (size = 113246208 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_gate_shexp.weight
+model has unused tensor blk.1.ffn_gate_shexp.weight (size = 2162688 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_down_shexp.weight
+model has unused tensor blk.1.ffn_down_shexp.weight (size = 2580480 bytes) -- ignoring
+create_tensor: loading tensor blk.1.ffn_up_shexp.weight
+model has unused tensor blk.1.ffn_up_shexp.weight (size = 2162688 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_output.scale
+create_tensor: loading tensor blk.0.ffn_gate.scale
+create_tensor: loading tensor blk.0.ffn_down.scale
+create_tensor: loading tensor blk.0.ffn_up.scale
+create_tensor: loading tensor blk.0.attn_output.input_scale
+create_tensor: loading tensor blk.0.ffn_gate.input_scale
+create_tensor: loading tensor blk.0.ffn_down.input_scale
+create_tensor: loading tensor blk.0.ffn_up.input_scale
+done_getting_tensors: tensor 'token_embd.weight' (q4_K) (and 0 others) cannot be used with preferred buffer type CPU_REPACK, using CPU instead
+load_tensors: offloading output layer to GPU
+load_tensors: offloading 1 repeating layers to GPU
+load_tensors: offloaded 3/3 layers to GPU
+load_tensors:          CPU model buffer size =   170.16 MiB
+load_tensors:         MTL0 model buffer size =    53.35 MiB
+load_all_data: device MTL0 does not support async, host buffers or events
+.......load_all_data: no device found for buffer type CPU for async uploads
+.
+llama_init_from_model: model default pooling_type is [-1], but [0] was specified
+llama_context: constructing llama_context
+llama_context: n_seq_max             = 1
+llama_context: n_ctx                 = 256
+llama_context: n_ctx_seq             = 256
+llama_context: n_batch               = 32
+llama_context: n_ubatch              = 32
+llama_context: causal_attn           = 1
+llama_context: flash_attn            = disabled
+llama_context: kv_unified            = false
+llama_context: freq_base             = 1000000.0
+llama_context: freq_scale            = 1
+llama_context: n_rs_seq              = 0
+llama_context: n_outputs_max         = 32
+llama_context: n_outputs_max_per_seq = 1
+llama_context: n_ctx_seq (256) < n_ctx_train (202752) -- the full capacity of the model will not be utilized
+ggml_metal_init: allocating
+ggml_metal_init: picking default device: Apple M4 GPU
+ggml_metal_init: use fusion         = true
+ggml_metal_init: use concurrency    = true
+ggml_metal_init: use graph optimize = true
+set_abort_callback: call
+llama_context:        CPU  output buffer size =     0.60 MiB
+llama_kv_cache: layer   0: dev = MTL0
+llama_kv_cache:       MTL0 KV buffer size =     0.28 MiB
+llama_kv_cache: size =    0.28 MiB (   256 cells,   1 layers,  1/1 seqs), K (f16):    0.28 MiB, V (f16):    0.00 MiB
+llama_kv_cache: n_rot_k = 0, n_embd_head_k_all = 576
+llama_kv_cache: n_rot_v = 0, n_embd_head_k_all = 0
+llama_context: enumerating backends
+llama_context: backend_ptrs.size() = 3
+sched_reserve: reserving ...
+sched_reserve: max_nodes = 1024
+sched_reserve: reserving full memory module
+sched_reserve: worst-case: n_tokens = 32, n_seqs = 1, n_outputs = 1
+resolve_fused_ops: resolving fused DeepSeek V4 HC support:
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC pre enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC comb enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC post enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =   32, n_seqs =  1, n_outputs =   32
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {    32,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {     1,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {     1,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+graph_reserve: reserving a graph for ubatch with n_tokens =   32, n_seqs =  1, n_outputs =   32
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l0 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                inp_mixed_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_1' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-0' (ROPE)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-0' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                 inp_mixed_slots' [i64, ne = {    32,     1,     1,     1 }] is used by node ' (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                  inp_mixed_embd' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'node_2' (DUP)
+llama_graph_n_input_tensors: input tensor '                      inp_tokens' [i32, ne = {    32,     1,     1,     1 }] is used by node 'embd' (GET_ROWS)
+sched_reserve:       MTL0 compute buffer size =     4.78 MiB
+sched_reserve:        CPU compute buffer size =     1.03 MiB
+sched_reserve: graph: nodes = 51, splits = 2, input objects = 3, input tensors = 7
+sched_reserve: reserve took 0.69 ms, sched copies = 1
+llama_model_loader: loaded meta data with 60 key-value pairs and 34 tensors from /private/var/containers/Bundle/Application/D4E25AC7-6742-4F76-8975-E39885E0AC2B/MeshThingProbe.app/GLM-4.7-Flash-two-layer-fixture.gguf (version GGUF V3 (latest))
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = deepseek2
+llama_model_loader: - kv   1:                               general.type str              = model
+llama_model_loader: - kv   2:                     general.sampling.top_p f32              = 0.950000
+llama_model_loader: - kv   3:                      general.sampling.temp f32              = 1.000000
+llama_model_loader: - kv   4:                               general.name str              = Glm-4.7-Flash
+llama_model_loader: - kv   5:                           general.basename str              = Glm-4.7-Flash
+llama_model_loader: - kv   6:                       general.quantized_by str              = Unsloth
+llama_model_loader: - kv   7:                         general.size_label str              = 64x2.6B
+llama_model_loader: - kv   8:                            general.license str              = mit
+llama_model_loader: - kv   9:                           general.repo_url str              = https://huggingface.co/unsloth
+llama_model_loader: - kv  10:                   general.base_model.count u32              = 1
+llama_model_loader: - kv  11:                  general.base_model.0.name str              = GLM 4.7 Flash
+llama_model_loader: - kv  12:          general.base_model.0.organization str              = Zai Org
+llama_model_loader: - kv  13:              general.base_model.0.repo_url str              = https://huggingface.co/zai-org/GLM-4....
+llama_model_loader: - kv  14:                               general.tags arr[str,2]       = ["unsloth", "text-generation"]
+llama_model_loader: - kv  15:                          general.languages arr[str,2]       = ["en", "zh"]
+llama_model_loader: - kv  16:                      deepseek2.block_count u32              = 2
+llama_model_loader: - kv  17:                   deepseek2.context_length u32              = 202752
+llama_model_loader: - kv  18:                 deepseek2.embedding_length u32              = 2048
+llama_model_loader: - kv  19:              deepseek2.feed_forward_length u32              = 10240
+llama_model_loader: - kv  20:             deepseek2.attention.head_count u32              = 20
+llama_model_loader: - kv  21:          deepseek2.attention.head_count_kv u32              = 1
+llama_model_loader: - kv  22:                   deepseek2.rope.freq_base f32              = 1000000.000000
+llama_model_loader: - kv  23: deepseek2.attention.layer_norm_rms_epsilon f32              = 0.000010
+llama_model_loader: - kv  24:                deepseek2.expert_used_count u32              = 4
+llama_model_loader: - kv  25:               deepseek2.expert_group_count u32              = 1
+llama_model_loader: - kv  26:          deepseek2.expert_group_used_count u32              = 1
+llama_model_loader: - kv  27:               deepseek2.expert_gating_func u32              = 2
+llama_model_loader: - kv  28:        deepseek2.leading_dense_block_count u32              = 1
+llama_model_loader: - kv  29:                       deepseek2.vocab_size u32              = 154880
+llama_model_loader: - kv  30:            deepseek2.attention.q_lora_rank u32              = 768
+llama_model_loader: - kv  31:           deepseek2.attention.kv_lora_rank u32              = 512
+llama_model_loader: - kv  32:             deepseek2.attention.key_length u32              = 576
+llama_model_loader: - kv  33:           deepseek2.attention.value_length u32              = 512
+llama_model_loader: - kv  34:         deepseek2.attention.key_length_mla u32              = 256
+llama_model_loader: - kv  35:       deepseek2.attention.value_length_mla u32              = 256
+llama_model_loader: - kv  36:       deepseek2.expert_feed_forward_length u32              = 1536
+llama_model_loader: - kv  37:                     deepseek2.expert_count u32              = 64
+llama_model_loader: - kv  38:              deepseek2.expert_shared_count u32              = 1
+llama_model_loader: - kv  39:             deepseek2.expert_weights_scale f32              = 1.800000
+llama_model_loader: - kv  40:              deepseek2.expert_weights_norm bool             = true
+llama_model_loader: - kv  41:             deepseek2.rope.dimension_count u32              = 64
+llama_model_loader: - kv  42:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  43:                         tokenizer.ggml.pre str              = glm4
+llama_model_loader: - kv  44:                      tokenizer.ggml.tokens arr[str,154880]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  45:                  tokenizer.ggml.token_type arr[i32,154880]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  46:                      tokenizer.ggml.merges arr[str,321649]  = ["Ġ Ġ", "Ġ ĠĠĠ", "ĠĠ ĠĠ", "...
+llama_model_loader: - kv  47:                tokenizer.ggml.eos_token_id u32              = 154820
+llama_model_loader: - kv  48:            tokenizer.ggml.padding_token_id u32              = 154821
+llama_model_loader: - kv  49:                tokenizer.ggml.bos_token_id u32              = 154822
+llama_model_loader: - kv  50:                tokenizer.ggml.eot_token_id u32              = 154827
+llama_model_loader: - kv  51:            tokenizer.ggml.unknown_token_id u32              = 154820
+llama_model_loader: - kv  52:                tokenizer.ggml.eom_token_id u32              = 154829
+llama_model_loader: - kv  53:                    tokenizer.chat_template str              = [gMASK]<sop>\n{%- if tools -%}\n<|syste...
+llama_model_loader: - kv  54:               general.quantization_version u32              = 2
+llama_model_loader: - kv  55:                          general.file_type u32              = 15
+llama_model_loader: - kv  56:                      quantize.imatrix.file str              = GLM-4.7-Flash-GGUF/imatrix_unsloth.gguf
+llama_model_loader: - kv  57:                   quantize.imatrix.dataset str              = unsloth_calibration_GLM-4.7-Flash.txt
+llama_model_loader: - kv  58:             quantize.imatrix.entries_count u32              = 607
+llama_model_loader: - kv  59:              quantize.imatrix.chunks_count u32              = 85
+llama_model_loader: - type  f32:   11 tensors
+llama_model_loader: - type q8_0:    6 tensors
+llama_model_loader: - type q4_K:   11 tensors
+llama_model_loader: - type q5_K:    2 tensors
+llama_model_loader: - type q6_K:    4 tensors
+print_info: file format = GGUF V3 (latest)
+print_info: file type   = Q4_K - Medium
+print_info: file size   = 866.69 MiB (5.37 BPW) 
+llama_prepare_model_devices: using device MTL0 (Apple M4 GPU) (unknown id) - 4685 MiB free
+init_tokenizer: initializing tokenizer for type 2
+load: 0 unused tokens
+load: control token: 154854 '<|image|>' is not marked as EOG
+load: control token: 154853 '<|end_of_box|>' is not marked as EOG
+load: control token: 154852 '<|begin_of_box|>' is not marked as EOG
+load: control token: 154840 '<|code_suffix|>' is not marked as EOG
+load: control token: 154839 '<|code_middle|>' is not marked as EOG
+load: control token: 154838 '<|code_prefix|>' is not marked as EOG
+load: control token: 154831 '<|end_of_image|>' is not marked as EOG
+load: control token: 154828 '<|assistant|>' is not marked as EOG
+load: control token: 154827 '<|user|>' is not marked as EOG
+load: control token: 154835 '<|end_of_audio|>' is not marked as EOG
+load: control token: 154832 '<|begin_of_video|>' is not marked as EOG
+load: control token: 154837 '<|end_of_transcription|>' is not marked as EOG
+load: control token: 154824 '<sop>' is not marked as EOG
+load: control token: 154825 '<eop>' is not marked as EOG
+load: control token: 154834 '<|begin_of_audio|>' is not marked as EOG
+load: control token: 154823 '[sMASK]' is not marked as EOG
+load: control token: 154833 '<|end_of_video|>' is not marked as EOG
+load: control token: 154855 '<|video|>' is not marked as EOG
+load: control token: 154836 '<|begin_of_transcription|>' is not marked as EOG
+load: control token: 154826 '<|system|>' is not marked as EOG
+load: control token: 154829 '<|observation|>' is not marked as EOG
+load: control token: 154821 '[MASK]' is not marked as EOG
+load: control token: 154830 '<|begin_of_image|>' is not marked as EOG
+load: control token: 154822 '[gMASK]' is not marked as EOG
+load: special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect
+load: special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect
+load: printing all EOG tokens:
+load:   - 154820 ('<|endoftext|>')
+load:   - 154827 ('<|user|>')
+load:   - 154829 ('<|observation|>')
+load: special tokens cache size = 36
+load: token to piece cache size = 0.9811 MB
+print_info: arch                  = deepseek2
+print_info: vocab_only            = 0
+print_info: no_alloc              = 0
+print_info: n_ctx_train           = 202752
+print_info: n_embd_inp            = 2048
+print_info: n_embd                = 2048
+print_info: n_embd_out            = 2048
+print_info: n_layer               = 2
+print_info: n_layer_all           = 2
+print_info: n_head                = 20
+print_info: n_head_kv             = 1
+print_info: n_rot                 = 64
+print_info: n_swa                 = 0
+print_info: is_swa_any            = 0
+print_info: non_causal_type       = 0
+print_info: n_embd_head_k         = 576
+print_info: n_embd_head_v         = 512
+print_info: n_gqa                 = 20
+print_info: n_embd_k_gqa          = 576
+print_info: n_embd_v_gqa          = 512
+print_info: f_norm_eps            = 0.0e+00
+print_info: f_norm_rms_eps        = 1.0e-05
+print_info: f_clamp_kqv           = 0.0e+00
+print_info: f_max_alibi_bias      = 0.0e+00
+print_info: f_logit_scale         = 0.0e+00
+print_info: f_attn_scale          = 0.0e+00
+print_info: f_attn_value_scale    = 0.0000
+print_info: n_ff                  = 10240
+print_info: n_expert              = 64
+print_info: n_expert_used         = 4
+print_info: n_expert_groups       = 1
+print_info: n_group_used          = 1
+print_info: causal attn           = 1
+print_info: pooling type          = -1
+print_info: rope type             = 0
+print_info: rope scaling          = linear
+print_info: freq_base_train       = 1000000.0
+print_info: freq_scale_train      = 1
+print_info: n_ctx_orig_yarn       = 202752
+print_info: rope_yarn_log_mul     = 0.0000
+print_info: rope_finetuned        = unknown
+print_info: model type            = ?B
+print_info: model params          = 1.35 B
+print_info: general.name          = Glm-4.7-Flash
+print_info: n_layer_dense_lead    = 1
+print_info: n_lora_q              = 768
+print_info: n_lora_kv             = 512
+print_info: n_embd_head_k_mla     = 256
+print_info: n_embd_head_v_mla     = 256
+print_info: n_ff_exp              = 1536
+print_info: n_expert_shared       = 1
+print_info: expert_weights_scale  = 1.8
+print_info: expert_weights_norm   = 1
+print_info: expert_gating_func    = sigmoid
+print_info: vocab type            = BPE
+print_info: n_vocab               = 154880
+print_info: n_merges              = 321649
+print_info: BOS token             = 154822 '[gMASK]'
+print_info: EOS token             = 154820 '<|endoftext|>'
+print_info: EOT token             = 154827 '<|user|>'
+print_info: EOM token             = 154829 '<|observation|>'
+print_info: UNK token             = 154820 '<|endoftext|>'
+print_info: PAD token             = 154821 '[MASK]'
+print_info: LF token              = 198 'Ċ'
+print_info: FIM PRE token         = 154838 '<|code_prefix|>'
+print_info: FIM SUF token         = 154840 '<|code_suffix|>'
+print_info: FIM MID token         = 154839 '<|code_middle|>'
+print_info: EOG token             = 154820 '<|endoftext|>'
+print_info: EOG token             = 154827 '<|user|>'
+print_info: EOG token             = 154829 '<|observation|>'
+print_info: max token length      = 1024
+mesh shard: layers [1, 2) of 2
+load_tensors: loading model tensors, this can take a while... (load_mode = none)
+load_tensors: layer   0 assigned to device MTL0, is_swa = 0
+load_tensors: layer   1 assigned to device MTL0, is_swa = 0
+load_tensors: layer   2 assigned to device MTL0, is_swa = 0
+create_tensor: loading tensor token_embd.weight
+model has unused tensor token_embd.weight (size = 178421760 bytes) -- ignoring
+create_tensor: loading tensor output_norm.weight
+create_tensor: loading tensor output.weight
+create_tensor: loading tensor blk.0.attn_norm.weight
+model has unused tensor blk.0.attn_norm.weight (size = 8192 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_q_a_norm.weight
+model has unused tensor blk.0.attn_q_a_norm.weight (size = 3072 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_kv_a_norm.weight
+model has unused tensor blk.0.attn_kv_a_norm.weight (size = 2048 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_q_a.weight
+model has unused tensor blk.0.attn_q_a.weight (size = 884736 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_q_b.weight
+model has unused tensor blk.0.attn_q_b.weight (size = 2211840 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_kv_a_mqa.weight
+model has unused tensor blk.0.attn_kv_a_mqa.weight (size = 1253376 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_k_b.weight
+model has unused tensor blk.0.attn_k_b.weight (size = 2088960 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_v_b.weight
+model has unused tensor blk.0.attn_v_b.weight (size = 2785280 bytes) -- ignoring
+create_tensor: loading tensor blk.0.attn_output.weight
+model has unused tensor blk.0.attn_output.weight (size = 5898240 bytes) -- ignoring
+create_tensor: loading tensor blk.0.ffn_norm.weight
+model has unused tensor blk.0.ffn_norm.weight (size = 8192 bytes) -- ignoring
+create_tensor: loading tensor blk.0.ffn_gate.weight
+model has unused tensor blk.0.ffn_gate.weight (size = 11796480 bytes) -- ignoring
+create_tensor: loading tensor blk.0.ffn_down.weight
+model has unused tensor blk.0.ffn_down.weight (size = 17203200 bytes) -- ignoring
+create_tensor: loading tensor blk.0.ffn_up.weight
+model has unused tensor blk.0.ffn_up.weight (size = 11796480 bytes) -- ignoring
+create_tensor: loading tensor blk.1.attn_norm.weight
+create_tensor: loading tensor blk.1.attn_q_a_norm.weight
+create_tensor: loading tensor blk.1.attn_kv_a_norm.weight
+create_tensor: loading tensor blk.1.attn_q_a.weight
+create_tensor: loading tensor blk.1.attn_q_b.weight
+create_tensor: loading tensor blk.1.attn_kv_a_mqa.weight
+create_tensor: loading tensor blk.1.attn_k_b.weight
+create_tensor: loading tensor blk.1.attn_v_b.weight
+create_tensor: loading tensor blk.1.attn_output.weight
+create_tensor: loading tensor blk.1.ffn_norm.weight
+create_tensor: loading tensor blk.1.ffn_gate_inp.weight
+create_tensor: loading tensor blk.1.exp_probs_b.bias
+create_tensor: loading tensor blk.1.ffn_down_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_up_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_exps.weight
+create_tensor: loading tensor blk.1.ffn_up_exps.weight
+create_tensor: loading tensor blk.1.ffn_gate_shexp.weight
+create_tensor: loading tensor blk.1.ffn_down_shexp.weight
+create_tensor: loading tensor blk.1.ffn_up_shexp.weight
+create_tensor: loading tensor blk.1.attn_output.scale
+create_tensor: loading tensor blk.1.ffn_gate_shexp.scale
+create_tensor: loading tensor blk.1.ffn_down_shexp.scale
+create_tensor: loading tensor blk.1.ffn_up_shexp.scale
+create_tensor: loading tensor blk.1.ffn_gate_exps.scale
+create_tensor: loading tensor blk.1.ffn_down_exps.scale
+create_tensor: loading tensor blk.1.ffn_up_exps.scale
+create_tensor: loading tensor blk.1.attn_output.input_scale
+create_tensor: loading tensor blk.1.ffn_gate_exps.input_scale
+create_tensor: loading tensor blk.1.ffn_down_exps.input_scale
+create_tensor: loading tensor blk.1.ffn_up_exps.input_scale
+create_tensor: loading tensor blk.1.ffn_gate_shexp.input_scale
+create_tensor: loading tensor blk.1.ffn_down_shexp.input_scale
+create_tensor: loading tensor blk.1.ffn_up_shexp.input_scale
+load_tensors: offloading output layer to GPU
+load_tensors: offloading 1 repeating layers to GPU
+load_tensors: offloaded 3/3 layers to GPU
+load_tensors:         MTL0 model buffer size =   643.18 MiB
+load_all_data: device MTL0 does not support async, host buffers or events
+........
+llama_init_from_model: model default pooling_type is [-1], but [0] was specified
+llama_context: constructing llama_context
+llama_context: n_seq_max             = 1
+llama_context: n_ctx                 = 256
+llama_context: n_ctx_seq             = 256
+llama_context: n_batch               = 32
+llama_context: n_ubatch              = 32
+llama_context: causal_attn           = 1
+llama_context: flash_attn            = disabled
+llama_context: kv_unified            = false
+llama_context: freq_base             = 1000000.0
+llama_context: freq_scale            = 1
+llama_context: n_rs_seq              = 0
+llama_context: n_outputs_max         = 32
+llama_context: n_outputs_max_per_seq = 1
+llama_context: n_ctx_seq (256) < n_ctx_train (202752) -- the full capacity of the model will not be utilized
+ggml_metal_init: allocating
+ggml_metal_init: picking default device: Apple M4 GPU
+ggml_metal_init: use fusion         = true
+ggml_metal_init: use concurrency    = true
+ggml_metal_init: use graph optimize = true
+set_abort_callback: call
+llama_context:        CPU  output buffer size =     0.59 MiB
+llama_kv_cache: layer   1: dev = MTL0
+llama_kv_cache:       MTL0 KV buffer size =     0.28 MiB
+llama_kv_cache: size =    0.28 MiB (   256 cells,   1 layers,  1/1 seqs), K (f16):    0.28 MiB, V (f16):    0.00 MiB
+llama_kv_cache: n_rot_k = 0, n_embd_head_k_all = 576
+llama_kv_cache: n_rot_v = 0, n_embd_head_k_all = 0
+llama_context: enumerating backends
+llama_context: backend_ptrs.size() = 3
+sched_reserve: reserving ...
+sched_reserve: max_nodes = 1024
+sched_reserve: reserving full memory module
+sched_reserve: worst-case: n_tokens = 32, n_seqs = 1, n_outputs = 1
+resolve_fused_ops: resolving fused DeepSeek V4 HC support:
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_39' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'norm-1' (RMS_NORM)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC pre enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_39' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'norm-1' (RMS_NORM)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC comb enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_39' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'norm-1' (RMS_NORM)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+resolve_fused_ops: fused DeepSeek V4 HC post enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =   32, n_seqs =  1, n_outputs =   32
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_39' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'norm-1' (RMS_NORM)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_39' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {     1,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {     1,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,     1,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {     1,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'norm-1' (RMS_NORM)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+graph_reserve: reserving a graph for ubatch with n_tokens =   32, n_seqs =  1, n_outputs =   32
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_39' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                         out_ids' [i32, ne = {    32,     1,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+llama_graph_n_input_tensors: input tensor '                 attn_inp_k_idxs' [i64, ne = {    32,     1,     1,     1 }] is used by node 'cache_k_l1 (view)' (SET_ROWS)
+llama_graph_n_input_tensors: input tensor '                attn_inp_kq_mask' [f32, ne = {   256,    32,     1,     1 }] is used by node 'kq_soft_max-1' (SOFT_MAX)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'q_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '                         inp_pos' [i32, ne = {    32,     1,     1,     1 }] is used by node 'k_pe-1' (ROPE)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'norm-1' (RMS_NORM)
+llama_graph_n_input_tensors: input tensor '              shard_hidden_input' [f32, ne = {  2048,    32,     1,     1 }] is used by node 'node_40' (GET_ROWS)
+sched_reserve:       MTL0 compute buffer size =    19.16 MiB
+sched_reserve:        CPU compute buffer size =     0.28 MiB
+sched_reserve: graph: nodes = 79, splits = 1, input objects = 4, input tensors = 5
+sched_reserve: reserve took 1.24 ms, sched copies = 1
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_rms_norm_mul_f32_4', name = 'kernel_rms_norm_mul_f32_4'
+ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_mul_f32_4                     0x109154700 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q4_K_f32_nt1_rt1', name = 'kernel_mul_mv_mma_q4_K_f32_nt1_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q4_K_f32_nt1_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=0      0x109154a80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q4_K_f32_nt4_rt1', name = 'kernel_mul_mv_mma_q4_K_f32_nt4_rt1_nsg=8_ne12=1_r2=1_r3=1_ne00=0_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q4_K_f32_nt4_rt1_nsg=8_ne12=1_r2=1_r3=1_ne00=0_add=0      0x109154e00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q8_0_f32_nt1_rt1', name = 'kernel_mul_mv_mma_q8_0_f32_nt1_rt1_nsg=4_ne12=20_r2=1_r3=1_ne00=192_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q8_0_f32_nt1_rt1_nsg=4_ne12=20_r2=1_r3=1_ne00=192_add=0      0x109155180 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_rope_norm_f32', name = 'kernel_rope_norm_f32_imrope=0_is_back=0'
+ggml_metal_library_compile_pipeline: loaded kernel_rope_norm_f32_imrope=0_is_back=0       0x109155500 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q8_0_f32_nt1_rt1', name = 'kernel_mul_mv_mma_q8_0_f32_nt1_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=2048_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q8_0_f32_nt1_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=2048_add=0      0x109155880 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_concat_f32', name = 'kernel_concat_f32'
+ggml_metal_library_compile_pipeline: loaded kernel_concat_f32                             0x109155c00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_set_rows_f32_i64_f16', name = 'kernel_set_rows_f32_i64_f16'
+ggml_metal_library_compile_pipeline: loaded kernel_set_rows_f32_i64_f16                   0x109155f80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_cpy_f16_f16', name = 'kernel_cpy_f16_f16'
+ggml_metal_library_compile_pipeline: loaded kernel_cpy_f16_f16                            0x109156300 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_f16_f32_nt1_rt1', name = 'kernel_mul_mv_mma_f16_f32_nt1_rt1_nsg=8_ne12=20_r2=20_r3=1_ne00=0_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_f16_f32_nt1_rt1_nsg=8_ne12=20_r2=20_r3=1_ne00=0_add=0      0x109156680 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_soft_max_f32_4', name = 'kernel_soft_max_f32_4'
+ggml_metal_library_compile_pipeline: loaded kernel_soft_max_f32_4                         0x109156a00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_f16_f32_nt1_rt1', name = 'kernel_mul_mv_mma_f16_f32_nt1_rt1_nsg=4_ne12=20_r2=20_r3=1_ne00=0_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_f16_f32_nt1_rt1_nsg=4_ne12=20_r2=20_r3=1_ne00=0_add=0      0x109156d80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q8_0_f32_nt1_rt1', name = 'kernel_mul_mv_mma_q8_0_f32_nt1_rt1_nsg=16_ne12=20_r2=1_r3=1_ne00=512_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q8_0_f32_nt1_rt1_nsg=16_ne12=20_r2=1_r3=1_ne00=512_add=0      0x109157100 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_cpy_f32_f32', name = 'kernel_cpy_f32_f32'
+ggml_metal_library_compile_pipeline: loaded kernel_cpy_f32_f32                            0x109157480 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q4_K_f32_nt2_rt1', name = 'kernel_mul_mv_mma_q4_K_f32_nt2_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=1'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q4_K_f32_nt2_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=1      0x109157800 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_swiglu_f32', name = 'kernel_swiglu_f32'
+ggml_metal_library_compile_pipeline: loaded kernel_swiglu_f32                             0x109157b80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q6_K_f32_nt2_rt1', name = 'kernel_mul_mv_mma_q6_K_f32_nt2_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=1'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q6_K_f32_nt2_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=1      0x173998000 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_get_rows_f32', name = 'kernel_get_rows_f32'
+ggml_metal_library_compile_pipeline: loaded kernel_get_rows_f32                           0x173998700 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_mma_q4_K_f32_nt2_rt1', name = 'kernel_mul_mv_mma_q4_K_f32_nt2_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_mma_q4_K_f32_nt2_rt1_nsg=16_ne12=1_r2=1_r3=1_ne00=0_add=0      0x173998a80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=1_cb=0'
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=1_cb=0      0x173998e00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_f32_f32_4', name = 'kernel_mul_mv_f32_f32_4_nsg=4_ne12=1_r2=1_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f32_f32_4_nsg=4_ne12=1_r2=1_r3=1_split=0      0x173999180 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32_4', name = 'kernel_unary_f32_f32_4_op=102_cnt=1'
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=102_cnt=1           0x173999500 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_argsort_f32_i32_desc', name = 'kernel_argsort_f32_i32_desc'
+ggml_metal_library_compile_pipeline: loaded kernel_argsort_f32_i32_desc                   0x173999880 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_argsort_merge_f32_i32_desc', name = 'kernel_argsort_merge_f32_i32_desc'
+ggml_metal_library_compile_pipeline: loaded kernel_argsort_merge_f32_i32_desc             0x173999c00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q5_K_f32', name = 'kernel_mul_mv_q5_K_f32_nsg=2_ne12=1_r2=1_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q5_K_f32_nsg=2_ne12=1_r2=1_r3=1_split=0      0x173999f80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_id_q4_K_f32', name = 'kernel_mul_mv_id_q4_K_f32_nsg=2_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q4_K_f32_nsg=2_split=0       0x17399a300 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_sum_rows_f32_f32_4', name = 'kernel_sum_rows_f32_f32_4_op=10'
+ggml_metal_library_compile_pipeline: loaded kernel_sum_rows_f32_f32_4_op=10               0x17399a680 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32', name = 'kernel_unary_f32_f32_op=12_cnt=1'
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_op=12_cnt=1              0x17399aa00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_id_q6_K_f32', name = 'kernel_mul_mv_id_q6_K_f32_nsg=2_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q6_K_f32_nsg=2_split=0       0x17399ad80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32', name = 'kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=1_cb=1'
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=1_cb=1      0x17399b100 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32', name = 'kernel_unary_f32_f32_op=10_cnt=1'
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_op=10_cnt=1              0x17399b480 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_moe_reduce_f32', name = 'kernel_moe_reduce_f32_n_expert_used=4'
+ggml_metal_library_compile_pipeline: loaded kernel_moe_reduce_f32_n_expert_used=4         0x17399b800 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q6_K_f32', name = 'kernel_mul_mv_q6_K_f32_nsg=2_ne12=1_r2=1_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q6_K_f32_nsg=2_ne12=1_r2=1_r3=1_split=0      0x17399bb80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=0_nf=2_rb=1_cb=0'
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=2_rb=1_cb=0      0x1739c8000 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q4_K_f32', name = 'kernel_mul_mv_q4_K_f32_nsg=2_ne12=1_r2=1_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q4_K_f32_nsg=2_ne12=1_r2=1_r3=1_split=0      0x1739c9500 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q8_0_f32', name = 'kernel_mul_mv_q8_0_f32_nsg=4_ne12=20_r2=1_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q8_0_f32_nsg=4_ne12=20_r2=1_r3=1_split=0      0x1739c9880 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q8_0_f32', name = 'kernel_mul_mv_q8_0_f32_nsg=4_ne12=1_r2=1_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q8_0_f32_nsg=4_ne12=1_r2=1_r3=1_split=0      0x1739c9c00 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_f16_f32_4', name = 'kernel_mul_mv_f16_f32_4_nsg=4_ne12=20_r2=20_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f16_f32_4_nsg=4_ne12=20_r2=20_r3=1_split=0      0x1739c9f80 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_f16_f32_4', name = 'kernel_mul_mv_f16_f32_4_nsg=2_ne12=20_r2=20_r3=1_split=0'
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f16_f32_4_nsg=2_ne12=20_r2=20_r3=1_split=0      0x1739ca300 | th_max = 1024 | th_width =   32
+~llama_context:       MTL0 compute buffer size is  19.1562 MiB, matches expectation of  19.1562 MiB
+~llama_context:        CPU compute buffer size is   0.2817 MiB, matches expectation of   0.2817 MiB
+~llama_context:        CPU compute buffer size is   0.0000 MiB, matches expectation of   0.0000 MiB
+ggml_metal_free: deallocating
+~llama_context:       MTL0 compute buffer size is   4.7819 MiB, matches expectation of   4.7819 MiB
+~llama_context:        CPU compute buffer size is   1.0321 MiB, matches expectation of   1.0321 MiB
+~llama_context:        CPU compute buffer size is   0.0000 MiB, matches expectation of   0.0000 MiB
+ggml_metal_free: deallocating
+~llama_context:       MTL0 compute buffer size is  19.9382 MiB, matches expectation of  19.9382 MiB
+~llama_context:        CPU compute buffer size is   1.0322 MiB, matches expectation of   1.0322 MiB
+~llama_context:        CPU compute buffer size is   0.0000 MiB, matches expectation of   0.0000 MiB
+ggml_metal_free: deallocating
+MESHTHING_PROBE_RESULT: {"passed":true,"positions":16,"reset_passed":true,"max_logit_error":0,"prefix_buffer_bytes":240753152,"suffix_buffer_bytes":695101184,"reference_buffer_bytes":931364864,"configuration":"per-model C API; no environment mutation","scope":"GLM two-layer numerical fixture, no Iroh"}
+

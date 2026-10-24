@@ -1,0 +1,4 @@
+2026-10-24T21:25:21.684366Z  INFO llm_cluster::rpc_bridge: rpc bridge leader listening listen=127.0.0.1:50170 worker=6d937c03ea
+2026-10-24T21:25:24.687023Z  INFO endpoint{id=7c8c4f91e3}:relay-actor: iroh::socket::transports::relay::actor: home is now relay https://use1-1.relay.n0.iroh.link./, was None
+2026-10-24T21:26:17.916509Z  INFO llm_cluster::rpc_bridge: connected to rpc bridge worker worker=6d937c03ea path="relay"
+2026-10-24T21:26:45.887384Z  INFO llm_cluster::rpc_bridge: rpc bridge stream closed remote=6d937c03ea stream=client bidirectional stream 0 tcp_peer=127.0.0.1:55766 path="direct" tcp_to_iroh=1509 iroh_to_tcp=763490 duration_ms=27970 close_reason="both directions finished"

@@ -1,0 +1,7 @@
+{
+  "purpose": "truncated numerical fixture, not a usable GLM model",
+  "layers": 2,
+  "bytes": 918209376,
+  "sha256": "a87a5df2fcb20b4beec96cb543a09df436016068bd28d4dd6f9f377ca9641f47",
+  "source": "/Users/stephenson.439/llama-rpc-demo/models/GLM-4.7-Flash-Q4_K_M.gguf.part"
+}

@@ -36,7 +36,7 @@ def main() -> None:
     reader = gguf.GGUFReader(args.model)
     architecture = reader.fields["general.architecture"].contents()
     layers = reader.fields[f"{architecture}.block_count"].contents()
-    if architecture not in {"llama", "qwen2"} or not 0 <= args.begin < args.cut <= layers:
+    if architecture not in {"llama", "qwen2", "deepseek2"} or not 0 <= args.begin < args.cut <= layers:
         raise ValueError("invalid/unsupported partition")
     writer = gguf.GGUFWriter(args.output, architecture, endianess=reader.endianess)
     for field in reader.fields.values():

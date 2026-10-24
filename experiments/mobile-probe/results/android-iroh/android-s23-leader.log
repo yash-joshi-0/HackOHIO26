@@ -1,0 +1,8 @@
+2026-10-24T21:42:55.253548Z  INFO llm_cluster::rpc_bridge: rpc bridge leader listening listen=127.0.0.1:50270 worker=3cbf92fb1d
+2026-10-24T21:42:58.257034Z  INFO endpoint{id=7c8c4f91e3}:relay-actor: iroh::socket::transports::relay::actor: home is now relay https://use1-1.relay.n0.iroh.link./, was None
+2026-10-24T21:43:01.854401Z  WARN llm_cluster::rpc_bridge: dropping rpc client client=127.0.0.1:57102 error=failed to connect to worker 3cbf92fb1d: No addressing information available: No addressing information available: All address lookup services failed or produced no results
+    Service 'pkarr' failed: Error resolving http request
+    Service 'dns' failed: no calls succeeded: [Failed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT record]
+2026-10-24T21:43:26.483435Z  WARN llm_cluster::rpc_bridge: dropping rpc client client=127.0.0.1:57141 error=failed to connect to worker 3cbf92fb1d: No addressing information available: No addressing information available: All address lookup services failed or produced no results
+    Service 'pkarr' failed: Error resolving http request
+    Service 'dns' failed: no calls succeeded: [Failed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT recordFailed to resolve TXT record]

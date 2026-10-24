@@ -1,0 +1,7 @@
+{
+  "status": "failed",
+  "scope": "two-layer GLM correctness over Android Iroh; no capacity/speed claim",
+  "fixture_sha256": "a87a5df2fcb20b4beec96cb543a09df436016068bd28d4dd6f9f377ca9641f47",
+  "steps": [],
+  "error": "[Errno 54] Connection reset by peer"
+}

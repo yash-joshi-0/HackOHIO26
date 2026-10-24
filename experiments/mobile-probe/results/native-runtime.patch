@@ -1,0 +1,257 @@
+diff --git a/include/llama.h b/include/llama.h
+index 3af6e22..608a8fc 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -35,6 +35,7 @@
+ #endif
+ 
+ #define LLAMA_DEFAULT_SEED 0xFFFFFFFF
++#define LLAMA_MESH_SHARD_PARAMS 1
+ 
+ #define LLAMA_TOKEN_NULL -1
+ 
+@@ -325,6 +326,8 @@ extern "C" {
+         const struct llama_model_tensor_buft_override * tensor_buft_overrides;
+ 
+         int32_t n_gpu_layers; // number of layers to store in VRAM, a negative value means all layers
++        int32_t shard_begin;  // private MeshThing ABI: first owned layer
++        int32_t shard_end;    // exclusive end; -1 uses full model or legacy environment override
+         enum llama_split_mode split_mode; // how to split the model across multiple GPUs
+         enum llama_load_mode  load_mode;  // how to load the model
+ 
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index c81433b..3c08bdb 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -2635,6 +2635,14 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd, float to
+     assert(n_embd_inp >= n_embd);
+ 
+     auto inp = std::make_unique<llm_graph_input_embd>(n_embd_inp);
++    if (tok_embd == nullptr) {
++        inp->embd = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd_inp, ubatch.n_tokens);
++        ggml_set_input(inp->embd);
++        ggml_set_name(inp->embd, "shard_hidden_input");
++        auto * hidden = inp->embd;
++        res->add_input(std::move(inp));
++        return hidden;
++    }
+ 
+     // mixed path (ubatch.is_mixed()): set_rows the token rows into a copy of the embd rows, with its own inputs as select branches must not share tensors
+     // TODO: use inp->tokens and inp->embd once ggml_build_forward_select allows it
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 6f0e3f7..a6750b6 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -163,6 +163,9 @@ llama_kv_cache::llama_kv_cache(
+     const bool is_mla = hparams.is_mla();
+ 
+     for (uint32_t il = 0; il < n_layer; il++) {
++        if (model.shard_end >= 0 && ((int) il < model.shard_begin || (int) il >= model.shard_end)) {
++            continue;
++        }
+         if (!hparams.has_kv(il)) {
+             LLAMA_LOG_DEBUG("%s: layer %3d: does not have KV cache\n", __func__, il);
+             continue;
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 066e69e..e7ba67c 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1184,6 +1184,9 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+ 
+         // skip unused tensors
+         if (info.op == GGML_OP_NONE || (flags & TENSOR_SKIP)) {
++            if ((flags & TENSOR_SKIP) && (flags & TENSOR_DUPLICATED)) {
++                return nullptr;
++            }
+             const size_t nbytes = ggml_nbytes(t_meta);
+             LLAMA_LOG_WARN("model has unused tensor %s (size = %zu bytes) -- ignoring\n", tn.str().c_str(), nbytes);
+ 
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index 65c42f8..bd547b1 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -1590,6 +1590,32 @@ void llama_model_base::load_vocab(llama_model_loader & ml) {
+ }
+ 
+ bool llama_model_base::load_tensors(llama_model_loader & ml) {
++    shard_end = hparams.n_layer();
++    const char * range = std::getenv("MESHTHING_SHARD");
++    if (params.shard_end >= 0) {
++        shard_begin = params.shard_begin;
++        shard_end = params.shard_end;
++    } else if (range) {
++        char trailing;
++        if (sscanf(range, "%d:%d%c", &shard_begin, &shard_end, &trailing) != 2) {
++            throw std::runtime_error("invalid MESHTHING_SHARD syntax");
++        }
++    }
++    if (params.shard_end >= 0 || range) {
++        if (shard_begin < 0 || shard_end <= shard_begin || shard_end > (int) hparams.n_layer() ||
++                (arch != LLM_ARCH_LLAMA && arch != LLM_ARCH_QWEN2 && arch != LLM_ARCH_DEEPSEEK2) ||
++                (arch != LLM_ARCH_DEEPSEEK2 && hparams.n_expert > 0)) {
++            throw std::runtime_error("invalid/unsupported MESHTHING_SHARD range or architecture");
++        }
++        LLAMA_LOG_INFO("mesh shard: layers [%d, %d) of %u\n", shard_begin, shard_end, hparams.n_layer());
++    }
++    uint32_t stored_begin = 0, stored_end = 0;
++    const bool has_begin = ml.get_key("meshthing.shard_begin", stored_begin, false);
++    const bool has_end = ml.get_key("meshthing.shard_end", stored_end, false);
++    if (has_begin != has_end || (has_begin &&
++            (stored_begin != (uint32_t) shard_begin || stored_end != (uint32_t) shard_end))) {
++        throw std::runtime_error("exported shard range does not match requested partition");
++    }
+     const auto & split_mode   = params.split_mode;
+     const bool use_mlock      = params.load_mode == LLAMA_LOAD_MODE_MLOCK || params.load_mode == LLAMA_LOAD_MODE_MMAP_MLOCK;
+     const auto & tensor_split = params.tensor_split;
+@@ -2395,6 +2421,15 @@ void llama_model_base::load_tensors_hadamard() {
+ }
+ 
+ ggml_tensor * llama_model_base::create_tensor(llama_model_loader & ml, const LLM_TN_IMPL & tn, const std::initializer_list<int64_t> & ne, int flags) {
++    if (shard_end >= 0) {
++        bool skip = tn.bid >= 0 && (tn.bid < shard_begin || tn.bid >= shard_end);
++        skip |= shard_begin > 0 && tn.tensor == LLM_TENSOR_TOKEN_EMBD && !(flags & llama_model_loader::TENSOR_DUPLICATED);
++        skip |= shard_end < (int) hparams.n_layer() &&
++                (tn.tensor == LLM_TENSOR_OUTPUT || tn.tensor == LLM_TENSOR_OUTPUT_NORM);
++        if (skip) {
++            flags |= llama_model_loader::TENSOR_SKIP | llama_model_loader::TENSOR_NOT_REQUIRED;
++        }
++    }
+     const buft_list_t * buft_list_layer = nullptr;
+     if (tn.bid != -1) {
+         // blocks that are not model layers (e.g. the blocks of a head) go with the output
+@@ -3371,6 +3406,8 @@ llama_model_params llama_model_default_params() {
+         /*.devices                     =*/ nullptr,
+         /*.tensor_buft_overrides       =*/ nullptr,
+         /*.n_gpu_layers                =*/ -1,
++        /*.shard_begin                 =*/ 0,
++        /*.shard_end                   =*/ -1,
+         /*.split_mode                  =*/ LLAMA_SPLIT_MODE_LAYER,
+         /*.load_mode                   =*/ LLAMA_LOAD_MODE_AUTO,
+         /*.lazy_mode                   =*/ LLAMA_LAZY_MODE_AUTO,
+diff --git a/src/llama-model.h b/src/llama-model.h
+index cdf060d..0deba6a 100644
+--- a/src/llama-model.h
++++ b/src/llama-model.h
+@@ -706,6 +706,8 @@ struct llama_hadamard {
+ };
+ 
+ struct llama_model {
++    int shard_begin = 0;
++    int shard_end = -1;
+     llm_type type = LLM_TYPE_UNKNOWN;
+     llm_arch arch = LLM_ARCH_UNKNOWN;
+ 
+diff --git a/src/models/deepseek2.cpp b/src/models/deepseek2.cpp
+index 5fd24d1..24b7924 100644
+--- a/src/models/deepseek2.cpp
++++ b/src/models/deepseek2.cpp
+@@ -81,7 +81,7 @@ void llama_model_deepseek2::load_arch_tensors(llama_model_loader & ml) {
+     output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
+     // try to load output.weight, if not found, use token_embd (tied embeddings)
+     output      = create_tensor(tn(LLM_TENSOR_OUTPUT,      "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
+-    if (!output) {
++    if (!output && shard_end == n_layer) {
+         output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
+     }
+ 
+@@ -454,9 +454,9 @@ llama_model_deepseek2::graph::graph(const llama_model & model, const llm_graph_p
+     auto * inp_attn_kv = !is_mla ? build_attn_inp_kv() : nullptr;
+     auto * inp_attn_k  =  is_mla ? build_attn_inp_k()  : nullptr;
+ 
+-    ggml_tensor * inp_out_ids = build_inp_out_ids();
++    ggml_tensor * inp_out_ids = model.shard_end < n_layer ? nullptr : build_inp_out_ids();
+ 
+-    for (int il = 0; il < n_layer; ++il) {
++    for (int il = model.shard_begin; il < model.shard_end; ++il) {
+         ggml_tensor * inpSA = inpL;
+ 
+         // norm
+@@ -685,6 +685,12 @@ llama_model_deepseek2::graph::graph(const llama_model & model, const llm_graph_p
+     }
+     cur = inpL;
+ 
++    if (model.shard_end < n_layer) {
++        res->t_embd = cur;
++        ggml_build_forward_expand(gf, cur);
++        return;
++    }
++
+     cur = build_norm(cur, model.output_norm, NULL, LLM_NORM_RMS, -1);
+ 
+     cb(cur, "h_nextn", -1);
+diff --git a/src/models/llama.cpp b/src/models/llama.cpp
+index f9c1251..7c75abf 100644
+--- a/src/models/llama.cpp
++++ b/src/models/llama.cpp
+@@ -41,7 +41,7 @@ void llama_model_llama::load_arch_tensors(llama_model_loader &) {
+     output      = create_tensor(tn(LLM_TENSOR_OUTPUT,      "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
+ 
+     // if output is NULL, init from the input tok embed
+-    if (output == NULL) {
++    if (output == NULL && shard_end == n_layer) {
+         output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
+     }
+ 
+@@ -121,9 +121,9 @@ llama_model_llama::graph<embed>::graph(const llama_model & model, const llm_grap
+ 
+     const float kq_scale = hparams.f_attention_scale == 0.0f ? 1.0f/sqrtf(float(n_embd_head)) : hparams.f_attention_scale;
+ 
+-    ggml_tensor * inp_out_ids = build_inp_out_ids();
++    ggml_tensor * inp_out_ids = model.shard_end < n_layer ? nullptr : build_inp_out_ids();
+ 
+-    for (int il = 0; il < n_layer; ++il) {
++    for (int il = model.shard_begin; il < model.shard_end; ++il) {
+         res->t_layer_inp[il] = inpL;
+ 
+         ggml_tensor * inpSA = inpL;
+@@ -228,6 +228,12 @@ llama_model_llama::graph<embed>::graph(const llama_model & model, const llm_grap
+     }
+     cur = inpL;
+ 
++    if (model.shard_end < n_layer) {
++        res->t_embd = cur;
++        ggml_build_forward_expand(gf, cur);
++        return;
++    }
++
+     cur = build_norm(cur,
+             model.output_norm, NULL,
+             LLM_NORM_RMS, -1);
+diff --git a/src/models/qwen2.cpp b/src/models/qwen2.cpp
+index d2cd8e2..205a2c0 100644
+--- a/src/models/qwen2.cpp
++++ b/src/models/qwen2.cpp
+@@ -26,7 +26,7 @@ void llama_model_qwen2::load_arch_tensors(llama_model_loader &) {
+     output      = create_tensor(tn(LLM_TENSOR_OUTPUT,      "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
+     output_b    = create_tensor(tn(LLM_TENSOR_OUTPUT,      "bias"),   {n_vocab}, TENSOR_NOT_REQUIRED);
+     // if output is NULL, init from the input tok embed
+-    if (output == NULL) {
++    if (output == NULL && shard_end == n_layer) {
+         output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
+     }
+ 
+@@ -66,9 +66,9 @@ llama_model_qwen2::graph::graph(const llama_model & model, const llm_graph_param
+ 
+     auto * inp_attn = build_attn_inp_kv();
+ 
+-    ggml_tensor * inp_out_ids = build_inp_out_ids();
++    ggml_tensor * inp_out_ids = model.shard_end < n_layer ? nullptr : build_inp_out_ids();
+ 
+-    for (int il = 0; il < n_layer; ++il) {
++    for (int il = model.shard_begin; il < model.shard_end; ++il) {
+         ggml_tensor * inpSA = inpL;
+ 
+         // norm
+@@ -134,6 +134,12 @@ llama_model_qwen2::graph::graph(const llama_model & model, const llm_graph_param
+     }
+     cur = inpL;
+ 
++    if (model.shard_end < n_layer) {
++        res->t_embd = cur;
++        ggml_build_forward_expand(gf, cur);
++        return;
++    }
++
+     cur = build_norm(cur,
+             model.output_norm, NULL,
+             LLM_NORM_RMS, -1);

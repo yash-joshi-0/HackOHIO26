@@ -76,11 +76,16 @@ int main(int argc, char ** argv) {
         const uint16_t endian = 1;
         if (*reinterpret_cast<const unsigned char *>(&endian) != 1 || sizeof(float) != 4 ||
                 !std::numeric_limits<float>::is_iec559) throw std::runtime_error("unsupported float encoding");
-        const std::string range = std::to_string(begin) + ":" + std::to_string(end);
-        setenv("MESHTHING_SHARD", range.c_str(), 1);
         ggml_backend_load_all();
         llama_backend_init();
         auto mp = llama_model_default_params();
+#ifdef LLAMA_MESH_SHARD_PARAMS
+        mp.shard_begin = begin;
+        mp.shard_end = end;
+#else
+        const std::string range = std::to_string(begin) + ":" + std::to_string(end);
+        setenv("MESHTHING_SHARD", range.c_str(), 1);
+#endif
         mp.n_gpu_layers = gpu;
         mp.load_mode = LLAMA_LOAD_MODE_NONE;
         model = llama_model_load_from_file(argv[1], mp);
