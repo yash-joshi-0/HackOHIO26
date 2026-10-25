@@ -15,6 +15,7 @@ pub mod placement;
 pub mod planning;
 pub mod process;
 pub mod protocol;
+pub mod qualified_placement;
 pub mod ring_deployment;
 pub mod rpc_bridge;
 pub mod rpc_plan;

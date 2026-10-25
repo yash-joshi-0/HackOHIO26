@@ -120,6 +120,19 @@ enum Command {
         /// Versioned JSON with fresh range, link and memory observations.
         profile: PathBuf,
     },
+    /// Check version 2 evidence and print an advisory ring plan with exclusions.
+    QualifiedPlan { evidence: PathBuf },
+    /// Print a qualified advisory envelope containing real ring configurations; no launch.
+    PrepareQualifiedRing {
+        evidence: PathBuf,
+        registry: PathBuf,
+    },
+    /// Revalidate the entire qualified envelope and its separate freshness limits.
+    ValidateQualifiedRing {
+        deployment: PathBuf,
+        evidence: PathBuf,
+        registry: PathBuf,
+    },
     /// Prepare an EXPERIMENTAL ring manifest and worker arguments from measured ranges.
     /// Does not launch, reserve capacity, or qualify diagnostic measurements.
     PrepareRing {
@@ -504,6 +517,37 @@ async fn main() -> anyhow::Result<()> {
                 "placement plan ready"
             );
             println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(())
+        }
+        Command::QualifiedPlan { evidence } => {
+            let input = read_ring_json(&evidence)?;
+            let result = llm_cluster::qualified_placement::plan_ring(&input, current_unix_ms()?)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::PrepareQualifiedRing { evidence, registry } => {
+            let result = llm_cluster::qualified_placement::prepare_ring(
+                &read_ring_json(&evidence)?,
+                &read_ring_json(&registry)?,
+                current_unix_ms()?,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::ValidateQualifiedRing {
+            deployment,
+            evidence,
+            registry,
+        } => {
+            llm_cluster::qualified_placement::validate_deployment(
+                &read_ring_json(&deployment)?,
+                &read_ring_json(&evidence)?,
+                &read_ring_json(&registry)?,
+                current_unix_ms()?,
+            )?;
+            println!(
+                "{{\"evidence_consistent\":true,\"hardware_attested\":false,\"activation_ready\":false}}"
+            );
             Ok(())
         }
         Command::PrepareRing {
