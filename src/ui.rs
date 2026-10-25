@@ -20,14 +20,14 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::io::AsyncReadExt;
-use tokio::{
-    net::TcpListener,
-    sync::{Mutex, RwLock},
-};
+use tokio::{net::TcpListener, sync::Mutex};
 use tower_http::services::ServeDir;
 use tracing::debug;
 
@@ -58,26 +58,21 @@ struct App {
     queue: Arc<JobQueue>,
     upstream: Option<SocketAddr>,
     client: reqwest::Client,
-    /// Refreshed every two seconds and after mesh commands; request handlers use this snapshot.
-    published_status: RwLock<ApiEndpoint>,
+    /// Refreshed every two seconds and after mesh commands; request handlers never probe upstream.
+    backend_ready: AtomicBool,
     directory: PathBuf,
     commands: Mutex<()>,
     preferences: Mutex<()>,
 }
 impl App {
     async fn api_status(&self) -> ApiEndpoint {
-        self.published_status.read().await.clone()
+        let member = self.mesh_membership().await;
+        self.status_for(member, self.backend_ready.load(Ordering::Relaxed))
     }
 
     async fn refresh_api_status(&self) -> ApiEndpoint {
-        let member = match mesh_membership(self.node.snapshot().await) {
-            Ok(member) => Some(member),
-            Err(error) => {
-                debug!(%error, "mesh state unavailable while checking inference readiness");
-                None
-            }
-        };
-        let ready = if member == Some(true)
+        let member = self.mesh_membership().await;
+        let backend_ready = if member == Some(true)
             && let Some(upstream) = self.upstream
         {
             self.client
@@ -88,6 +83,22 @@ impl App {
         } else {
             false
         };
+        self.backend_ready.store(backend_ready, Ordering::Relaxed);
+        self.status_for(member, backend_ready)
+    }
+
+    async fn mesh_membership(&self) -> Option<bool> {
+        match mesh_membership(self.node.snapshot().await) {
+            Ok(member) => Some(member),
+            Err(error) => {
+                debug!(%error, "mesh state unavailable while checking inference readiness");
+                None
+            }
+        }
+    }
+
+    fn status_for(&self, member: Option<bool>, backend_ready: bool) -> ApiEndpoint {
+        let ready = member == Some(true) && self.upstream.is_some() && backend_ready;
         ApiEndpoint {
             base_url: format!("{}/v1", self.origin),
             inference_ready: ready,
@@ -109,22 +120,12 @@ impl App {
     async fn publish_status(&self) {
         let status = self.refresh_api_status().await;
         self.node.set_api_endpoint(Some(status.clone())).await;
-        *self.published_status.write().await = status;
     }
 }
 
 /// Preserve snapshot failures separately from a valid snapshot with no mesh membership.
 fn mesh_membership(snapshot: Result<Value>) -> Result<bool> {
     snapshot.map(|snapshot| !snapshot["mesh"].is_null())
-}
-
-fn initializing_api_status(origin: &str) -> ApiEndpoint {
-    ApiEndpoint {
-        base_url: format!("{origin}/v1"),
-        scope: "device_local".into(),
-        inference_ready: false,
-        message: "API status is initializing.".into(),
-    }
 }
 
 pub async fn run(options: Options) -> Result<()> {
@@ -174,7 +175,6 @@ pub async fn run(options: Options) -> Result<()> {
     );
     let node = Node::open(&directory).await?;
     let origin = format!("http://{local}");
-    let initial_status = initializing_api_status(&origin);
     let app = Arc::new(App {
         node,
         origin,
@@ -185,7 +185,7 @@ pub async fn run(options: Options) -> Result<()> {
             .timeout(Duration::from_secs(1))
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
-        published_status: RwLock::new(initial_status),
+        backend_ready: AtomicBool::new(false),
         commands: Mutex::new(()),
         preferences: Mutex::new(()),
     });
@@ -559,7 +559,7 @@ mod tests {
                 .timeout(Duration::from_secs(1))
                 .build()
                 .unwrap(),
-            published_status: RwLock::new(initializing_api_status(&origin)),
+            backend_ready: AtomicBool::new(false),
             directory: directory.path().to_owned(),
             commands: Mutex::new(()),
             preferences: Mutex::new(()),
