@@ -478,7 +478,7 @@ impl RingPlan {
             .iter()
             .skip(1)
             .map(|stage| match stage.location {
-                StageLocation::Remote { worker } => Ok(RingHop {
+                StageLocation::Remote { worker, .. } => Ok(RingHop {
                     begin: stage.begin,
                     end: stage.end,
                     worker,

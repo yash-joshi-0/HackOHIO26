@@ -9,16 +9,22 @@
 //! back to the first stage until end-of-generation, `max_tokens` or the context limit.
 //!
 //! The pipeline handles any number of stages; only the manifest restricts v1 topologies. Each
-//! runner serves one sequence, so links are single-use: [`Pipeline::generate`] consumes them,
-//! and any error closes every link and fails the generation without retrying.
+//! runner serves one sequence whose cache only grows, so links are single-use and a failed
+//! generation cannot be repaired in place. Instead the progress that must survive lives in a
+//! [`GenerationState`]: [`Pipeline::resume`] runs a fresh pipeline from it by prefilling the
+//! prompt plus every token generated so far (from step and position 0), then decoding on. A
+//! first attempt is a resume with nothing generated. [`classify`] tells a caller whether an
+//! error is worth another attempt on fresh links and which stage or worker failed.
 //!
 //! In EXPERIMENTAL ring execution ([`Pipeline::with_ring`]) the pipeline is the local stage 0,
 //! which tokenizes, followed by a [`RingLink`] that stands for every remote stage: stage 0's
 //! hidden rows go to the ring's entry worker and each step's token comes back from the terminal.
-//! The same decoding loop, stop rules and UTF-8 assembly apply.
+//! The same decoding loop, stop rules and UTF-8 assembly apply,
+//! but ring execution is never retried: the front end fails the job on any ring error.
 
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::process::Stdio;
@@ -32,6 +38,7 @@ use tokio::io::{
 };
 use tokio::process::Command;
 use tokio::sync::oneshot;
+use tokio::time::error::Elapsed;
 use tokio::time::{timeout, timeout_at};
 use tracing::{debug, info, warn};
 
@@ -41,7 +48,9 @@ use crate::protocol::RPC_BRIDGE_ALPN;
 use crate::rpc_bridge::path_kind;
 use crate::shard::manifest::same_sha256;
 use crate::shard::ring_origin::{RingLink, check_origin_stage};
-use crate::shard::wire::{self, MAX_BATCH_TOKENS, StageInput, StageMetadata, StepReply};
+use crate::shard::wire::{
+    self, MAX_BATCH_TOKENS, StageInput, StageMetadata, StepReply, StreamClosed,
+};
 
 /// Bound on waiting for a stage's metadata line; loading a large model can take minutes.
 pub const METADATA_TIMEOUT: Duration = Duration::from_secs(300);
@@ -108,6 +117,8 @@ pub struct StageLink {
     metadata: StageMetadata,
     guard: LinkGuard,
     label: String,
+    /// The remote worker serving this stage; `None` for a local runner.
+    worker: Option<EndpointId>,
 }
 
 impl StageLink {
@@ -146,6 +157,7 @@ impl StageLink {
             metadata,
             guard: LinkGuard::Process(Box::new(child)),
             label,
+            worker: None,
         })
     }
 
@@ -161,12 +173,12 @@ impl StageLink {
         let connection = endpoint
             .connect(worker, RPC_BRIDGE_ALPN)
             .await
-            .with_context(|| format!("failed to connect to {label}"))?;
+            .with_context(|| Unreachable(format!("failed to connect to {label}")))?;
         debug!(stage = %label, path = path_kind(&connection), connect_us = connect_started.elapsed().as_micros(), "remote stage connected");
         let (mut send, recv) = connection
             .open_bi()
             .await
-            .with_context(|| format!("failed to open a stream to {label}"))?;
+            .with_context(|| Unreachable(format!("failed to open a stream to {label}")))?;
         wire::write_preface(&mut send)
             .await
             .with_context(|| format!("failed to greet {label}"))?;
@@ -181,12 +193,21 @@ impl StageLink {
             metadata,
             guard: LinkGuard::Stream(connection),
             label,
+            worker: Some(worker),
         })
     }
 
     /// The stage's startup metadata.
     pub fn metadata(&self) -> &StageMetadata {
         &self.metadata
+    }
+
+    /// Names this link as stage `stage` of its pipeline, for [`classify`].
+    fn fault(&self, stage: usize) -> StageFault {
+        StageFault {
+            stage,
+            worker: self.worker,
+        }
     }
 
     /// Sends one request and reads its reply, all within `step_timeout`.
@@ -297,13 +318,27 @@ pub enum StageIdentity {
     },
 }
 
-/// Limits for one generation.
+/// Limits for one generation, counted over every attempt of it.
 #[derive(Clone, Copy, Debug)]
 pub struct GenerationLimits {
-    /// Most completion tokens to produce (at least 1).
+    /// Most completion tokens to produce in total (at least 1).
     pub max_tokens: u32,
     /// Context window every stage was started with.
     pub context: u32,
+}
+
+impl GenerationLimits {
+    /// Whether decoding must stop once a token sampled at `position` brings the completion
+    /// to `completion_tokens`: the budget is spent, or the token has no position to go to.
+    fn spent_after_token(self, completion_tokens: u32, position: u32) -> bool {
+        completion_tokens >= self.max_tokens || position >= self.context
+    }
+
+    /// Whether a resume is out of room before it starts: the budget is spent, or prefilling
+    /// `history` positions (prompt plus generated tokens) overflows the context.
+    fn spent_before_resume(self, completion_tokens: u32, history: u32) -> bool {
+        completion_tokens >= self.max_tokens || history > self.context
+    }
 }
 
 /// Why a generation stopped.
@@ -352,6 +387,145 @@ pub struct PromptTooLong {
 #[derive(Debug, thiserror::Error)]
 #[error("generation canceled because the HTTP client disconnected")]
 pub(crate) struct GenerationCancelled;
+
+/// Whether a failed generation may succeed if it is resumed on fresh stage links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureClass {
+    /// A stage or its link went away (I/O error, closed stream, timeout, runner exit, failed
+    /// dial): fresh links may well work.
+    Retryable,
+    /// Anything else (a prompt too long, metadata that does not match the manifest, a
+    /// sampled token outside the vocabulary, a protocol violation): retrying cannot help.
+    Fatal,
+}
+
+/// Context attached to an error from one stage of a running pipeline, naming that stage (its
+/// index in pipeline order) and, for a remote stage, the worker serving it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("stage {stage} failed")]
+pub struct StageFault {
+    /// Index of the stage in pipeline (manifest) order.
+    pub stage: usize,
+    /// The remote worker serving the stage; `None` for a local runner.
+    pub worker: Option<EndpointId>,
+}
+
+/// What [`classify`] found out about an error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Classification {
+    /// Whether another attempt may succeed.
+    pub class: FailureClass,
+    /// The stage that failed, when known.
+    pub fault: Option<StageFault>,
+}
+
+/// A remote stage could not be dialled or gave no stream. Attached as context, so its
+/// message is the error's own.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct Unreachable(String);
+
+/// Classifies an error from opening stage links or running a pipeline. It is retryable when
+/// caused by an I/O error, a stream that closed early (a runner that exited), a step or
+/// metadata timeout, or a failed dial; anything else, and always [`PromptTooLong`], is fatal.
+pub fn classify(error: &anyhow::Error) -> Classification {
+    let transient = error.downcast_ref::<Unreachable>().is_some()
+        || error.chain().any(|cause| {
+            cause.is::<io::Error>() || cause.is::<Elapsed>() || cause.is::<StreamClosed>()
+        });
+    let class = if transient && error.downcast_ref::<PromptTooLong>().is_none() {
+        FailureClass::Retryable
+    } else {
+        FailureClass::Fatal
+    };
+    Classification {
+        class,
+        fault: error.downcast_ref::<StageFault>().copied(),
+    }
+}
+
+/// The progress of one generation that outlives any single attempt: the prompt's tokens, the
+/// tokens generated so far and the text already handed to `on_text` (including a partly
+/// received UTF-8 character), so a resumed attempt never repeats text.
+pub struct GenerationState<F, Fut> {
+    limits: GenerationLimits,
+    /// The first attempt's final-stage tokenization; later attempts must match it.
+    prompt_tokens: Option<Vec<u32>>,
+    generated: Vec<u32>,
+    text: TextSink<F, Fut>,
+}
+
+impl<F, Fut> GenerationState<F, Fut>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    /// A generation with nothing produced yet; `on_text` receives each new piece of text and
+    /// is awaited before decoding goes on (so a slow reader applies backpressure).
+    pub fn new(limits: GenerationLimits, on_text: F) -> Self {
+        Self {
+            limits,
+            prompt_tokens: None,
+            generated: Vec::new(),
+            text: TextSink {
+                assembler: Utf8Assembler::default(),
+                text: String::new(),
+                on_text,
+                _future: PhantomData,
+            },
+        }
+    }
+
+    /// Completion tokens produced so far, over every attempt.
+    pub fn completion_tokens(&self) -> u32 {
+        token_len(&self.generated)
+    }
+
+    /// Records the prompt tokens on the first attempt; on later ones, insists the new final
+    /// stage tokenized the prompt identically.
+    fn adopt_prompt(&mut self, tokens: &[u32], label: &str) -> anyhow::Result<()> {
+        match &self.prompt_tokens {
+            None => self.prompt_tokens = Some(tokens.to_vec()),
+            Some(first) => ensure!(
+                first.as_slice() == tokens,
+                "{label} tokenized the prompt into {} tokens that differ from the {} of the \
+                 first attempt",
+                tokens.len(),
+                first.len()
+            ),
+        }
+        Ok(())
+    }
+
+    /// Every position a resume must prefill: the prompt, then each generated token.
+    fn history(&self) -> Vec<u32> {
+        let prompt = self.prompt_tokens.as_deref().unwrap_or_default();
+        [prompt, &self.generated].concat()
+    }
+
+    /// Whether the limits leave no room to resume.
+    fn spent(&self) -> bool {
+        let history = token_len(&self.history());
+        self.limits
+            .spent_before_resume(self.completion_tokens(), history)
+    }
+
+    async fn push(&mut self, token: u32, piece: &[u8]) {
+        self.generated.push(token);
+        self.text.push(piece).await;
+    }
+
+    /// Flushes any incomplete trailing bytes and describes the finished generation.
+    async fn finish(&mut self, finish: FinishReason) -> Generation {
+        self.text.flush().await;
+        Generation {
+            text: self.text.text.clone(),
+            finish,
+            prompt_tokens: self.prompt_tokens.as_deref().map_or(0, token_len),
+            completion_tokens: self.completion_tokens(),
+        }
+    }
+}
 
 /// Validated stage links, ready for one generation.
 pub struct Pipeline {
@@ -467,11 +641,12 @@ impl Pipeline {
         limits: GenerationLimits,
         mut on_text: F,
     ) -> anyhow::Result<Generation> {
-        self.generate_inner(limits, None, move |text| {
+        let on_text = move |text: String| {
             on_text(&text);
             std::future::ready(())
-        })
-        .await
+        };
+        self.resume(&mut GenerationState::new(limits, on_text))
+            .await
     }
 
     /// Runs generation with async text delivery and cooperative cancellation. The pipeline
@@ -479,87 +654,116 @@ impl Pipeline {
     pub async fn generate_cancellable<F, Fut>(
         self,
         limits: GenerationLimits,
-        cancel: oneshot::Receiver<()>,
+        mut cancel: oneshot::Receiver<()>,
         on_text: F,
     ) -> anyhow::Result<Generation>
     where
         F: FnMut(String) -> Fut,
         Fut: Future<Output = ()>,
     {
-        self.generate_inner(limits, Some(cancel), on_text).await
+        let mut state = GenerationState::new(limits, on_text);
+        self.resume_cancellable(&mut state, &mut cancel).await
     }
 
-    async fn generate_inner<F, Fut>(
+    /// Continues the generation in `state` on these (fresh) links, then closes them: prefills
+    /// the prompt and every token generated so far, and decodes on from the final reply until
+    /// end-of-generation or the limits, which count totals over every attempt. A resume with
+    /// no room left finishes with [`FinishReason::Length`]. The first resume records the
+    /// prompt tokens; a later one fails if the final stage tokenized the prompt differently.
+    /// On any error the links are killed, `state` keeps everything produced so far, and the
+    /// error is returned for the caller to [`classify`].
+    pub async fn resume<F, Fut>(
+        self,
+        state: &mut GenerationState<F, Fut>,
+    ) -> anyhow::Result<Generation>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.resume_inner(state, None).await
+    }
+
+    /// [`Pipeline::resume`] that instead ends with [`GenerationCancelled`] once `cancel`
+    /// resolves (the client disconnected), after closing every link. `cancel` is borrowed so
+    /// one receiver can guard every attempt of a generation; once it has resolved it must not
+    /// be passed again.
+    pub async fn resume_cancellable<F, Fut>(
+        self,
+        state: &mut GenerationState<F, Fut>,
+        cancel: &mut oneshot::Receiver<()>,
+    ) -> anyhow::Result<Generation>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.resume_inner(state, Some(cancel)).await
+    }
+
+    async fn resume_inner<F, Fut>(
         mut self,
-        limits: GenerationLimits,
-        cancel: Option<oneshot::Receiver<()>>,
-        on_text: F,
+        state: &mut GenerationState<F, Fut>,
+        cancel: Option<&mut oneshot::Receiver<()>>,
     ) -> anyhow::Result<Generation>
     where
         F: FnMut(String) -> Fut,
         Fut: Future<Output = ()>,
     {
         let result = match cancel {
-            Some(mut cancel) => tokio::select! {
+            Some(cancel) => tokio::select! {
                 biased;
-                _ = &mut cancel => Err(GenerationCancelled.into()),
-                result = self.run_async(limits, on_text) => result,
+                _ = cancel => Err(GenerationCancelled.into()),
+                result = self.run(state) => result,
             },
-            None => self.run_async(limits, on_text).await,
+            None => self.run(state).await,
         };
         let kill = result.is_err();
         self.close(kill).await;
         result
     }
 
-    async fn run_async<F, Fut>(
+    async fn run<F, Fut>(
         &mut self,
-        limits: GenerationLimits,
-        on_text: F,
+        state: &mut GenerationState<F, Fut>,
     ) -> anyhow::Result<Generation>
     where
         F: FnMut(String) -> Fut,
         Fut: Future<Output = ()>,
     {
+        let limits = state.limits;
         ensure!(limits.max_tokens >= 1, "max_tokens must be at least 1");
+        let final_label = &self.links[self.links.len() - 1].label;
+        state.adopt_prompt(&self.prompt_tokens, final_label)?;
         self.ensure_prompt_fits(limits.context)?;
+        if state.spent() {
+            return Ok(state.finish(FinishReason::Length).await);
+        }
         let mut decoder = Decoder::default();
-        let mut reply = self.prefill(&mut decoder).await?;
-        let mut text = TextSink {
-            assembler: Utf8Assembler::default(),
-            text: String::new(),
-            on_text,
-            _future: PhantomData,
-        };
+        let mut reply = self.prefill(&mut decoder, &state.history()).await?;
         let finish = loop {
             if reply.eog {
                 break FinishReason::Stop;
             }
             let token = self.sampled_token(&reply)?;
-            text.push(&reply.piece_bytes()?).await;
-            decoder.completion_tokens += 1;
-            if decoder.completion_tokens >= limits.max_tokens || decoder.position >= limits.context
-            {
+            state.push(token, &reply.piece_bytes()?).await;
+            if limits.spent_after_token(state.completion_tokens(), decoder.position) {
                 break FinishReason::Length;
             }
             reply = self.step(&mut decoder, &[token]).await?;
         };
-        Ok(Generation {
-            text: text.finish().await,
-            finish,
-            prompt_tokens: self.prompt_tokens(),
-            completion_tokens: decoder.completion_tokens,
-        })
+        Ok(state.finish(finish).await)
     }
 
-    /// Feeds the prompt in batches and returns the final stage's reply to the last batch.
-    async fn prefill(&mut self, decoder: &mut Decoder) -> anyhow::Result<StepReply> {
-        let prompt = std::mem::take(&mut self.prompt_tokens);
+    /// Feeds `history` in batches from position 0 and returns the final stage's reply to the
+    /// last batch.
+    async fn prefill(
+        &mut self,
+        decoder: &mut Decoder,
+        history: &[u32],
+    ) -> anyhow::Result<StepReply> {
         let mut last = None;
-        for batch in prompt.chunks(MAX_BATCH_TOKENS as usize) {
+        for batch in history.chunks(MAX_BATCH_TOKENS as usize) {
             last = Some(self.step(decoder, batch).await?);
         }
-        self.prompt_tokens = prompt;
         last.context("the prompt has no tokens")
     }
 
@@ -588,7 +792,8 @@ impl Pipeline {
             let max_floats = if is_final { 0 } else { row_values };
             let output = link
                 .exchange(step, position, &input, max_floats, self.step_timeout)
-                .await?;
+                .await
+                .with_context(|| link.fault(index))?;
             if is_final {
                 decoder.advance(count);
                 debug!(
@@ -646,7 +851,6 @@ impl Pipeline {
 struct Decoder {
     step: u32,
     position: u32,
-    completion_tokens: u32,
 }
 
 impl Decoder {
@@ -674,11 +878,10 @@ where
         self.deliver(fresh).await;
     }
 
-    /// Flushes any incomplete trailing bytes and returns the whole completion.
-    async fn finish(mut self) -> String {
+    /// Flushes any incomplete trailing bytes.
+    async fn flush(&mut self) {
         let rest = std::mem::take(&mut self.assembler).finish();
         self.deliver(rest).await;
-        self.text
     }
 
     async fn deliver(&mut self, fresh: String) {
@@ -948,6 +1151,101 @@ mod tests {
         assert!(check_identity(&meta, &unverified).is_ok());
         meta.source_sha256 = "cd".repeat(32);
         assert!(check_identity(&meta, &verified).is_err());
+    }
+
+    #[tokio::test]
+    async fn limits_count_totals_across_a_resume() {
+        let limits = GenerationLimits {
+            max_tokens: 5,
+            context: 8,
+        };
+        let mut emitted = Vec::new();
+        let mut state = GenerationState::new(limits, |text: String| {
+            emitted.push(text);
+            std::future::ready(())
+        });
+        state.adopt_prompt(&[0, 1, 2], "final").unwrap();
+        // A first attempt produced three tokens before failing: prompt plus those still fit.
+        for byte in *b"abc" {
+            state.push(u32::from(byte), &[byte]).await;
+        }
+        assert!(!state.spent());
+        // One more token fills the context exactly (3 + 4 = 8), so a resume still fits; at
+        // max_tokens (5) the budget is spent even though the context has room.
+        state.push(u32::from(b'd'), b"d").await;
+        assert!(!state.spent());
+        state.push(u32::from(b'e'), b"e").await;
+        assert!(state.spent());
+        let roomy = GenerationLimits {
+            max_tokens: 10,
+            ..limits
+        };
+        assert!(roomy.spent_before_resume(5, 9), "9 positions overflow 8");
+        assert!(!roomy.spent_before_resume(5, 8));
+        assert!(
+            roomy.spent_after_token(4, 8),
+            "no position for the next token"
+        );
+        assert!(roomy.spent_after_token(10, 3));
+        assert!(!roomy.spent_after_token(9, 7));
+        let generation = state.finish(FinishReason::Length).await;
+        drop(state);
+        assert_eq!(
+            (generation.prompt_tokens, generation.completion_tokens),
+            (3, 5)
+        );
+        assert_eq!(generation.text, "abcde");
+        assert_eq!(emitted.concat(), "abcde");
+    }
+
+    #[tokio::test]
+    async fn a_resume_keeps_a_split_character_and_needs_the_same_prompt() {
+        let limits = GenerationLimits {
+            max_tokens: 9,
+            context: 64,
+        };
+        let mut emitted = Vec::new();
+        let mut state = GenerationState::new(limits, |text: String| {
+            emitted.push(text);
+            std::future::ready(())
+        });
+        state.adopt_prompt(&[0, 7], "final").unwrap();
+        let euro = "€".as_bytes();
+        state.push(1, &euro[..2]).await;
+        // The next attempt's final stage must tokenize the prompt the same way.
+        assert!(state.adopt_prompt(&[0, 8], "final").is_err());
+        state.adopt_prompt(&[0, 7], "final").unwrap();
+        state.push(2, &euro[2..]).await;
+        assert_eq!(state.history(), [0, 7, 1, 2]);
+        assert_eq!(state.finish(FinishReason::Stop).await.text, "€");
+        drop(state);
+        assert_eq!(emitted, ["€"]);
+    }
+
+    #[test]
+    fn errors_are_classified_by_their_cause() {
+        let closed: anyhow::Error = io::Error::from(io::ErrorKind::UnexpectedEof).into();
+        let worker = iroh::SecretKey::from_bytes(&[3; 32]).public();
+        let fault = StageFault {
+            stage: 0,
+            worker: Some(worker),
+        };
+        let step_failure = closed.context("failed at step 2").context(fault);
+        let classified = classify(&step_failure);
+        assert_eq!(classified.class, FailureClass::Retryable);
+        assert_eq!(classified.fault, Some(fault));
+        let dial = anyhow::anyhow!("no route").context(Unreachable("failed to connect".into()));
+        assert_eq!(format!("{dial}"), "failed to connect");
+        assert_eq!(classify(&dial).class, FailureClass::Retryable);
+        let mismatch = anyhow::anyhow!("serves layers 0..1").context("stage 0");
+        assert_eq!(classify(&mismatch).class, FailureClass::Fatal);
+        assert_eq!(classify(&mismatch).fault, None);
+        let too_long: anyhow::Error = PromptTooLong {
+            prompt_tokens: 9,
+            context: 8,
+        }
+        .into();
+        assert_eq!(classify(&too_long).class, FailureClass::Fatal);
     }
 
     #[test]

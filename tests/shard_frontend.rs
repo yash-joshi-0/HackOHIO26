@@ -9,17 +9,19 @@ use std::collections::{BTreeMap, HashSet};
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use iroh::address_lookup::memory::MemoryLookup;
 use iroh::endpoint::{Connection, presets};
 use iroh::{Endpoint, EndpointAddr, RelayMode};
 use llm_cluster::protocol::RPC_BRIDGE_ALPN;
-use llm_cluster::shard::frontend::{FrontendConfig, serve_frontend};
+use llm_cluster::shard::frontend::{FrontendConfig, MAX_GENERATION_RETRIES, serve_frontend};
 use llm_cluster::shard::manifest::{ShardManifest, sha256_file};
 use llm_cluster::shard::pipeline::{
-    FinishReason, GenerationLimits, LocalLaunch, Pipeline, StageExpectation, StageIdentity,
-    StageLink,
+    FailureClass, FinishReason, GenerationLimits, GenerationState, LocalLaunch, Pipeline,
+    StageExpectation, StageIdentity, StageLink, classify,
 };
 use llm_cluster::shard::wire::{self, MAX_BATCH_TOKENS};
 use serde_json::{Value, json};
@@ -56,6 +58,8 @@ const BUDGET_BYTES: u64 = 1_048_576;
 const FAIL_AT_STEP_ENV: &str = "FAKE_SHARD_FAIL_AT_STEP";
 /// Makes the fake runner log every request header it receives.
 const LOG_ENV: &str = "FAKE_SHARD_LOG";
+/// Limits `FAKE_SHARD_FAIL_AT_STEP` to the first runner, which creates this marker file.
+const FAIL_ONCE_FILE_ENV: &str = "FAKE_SHARD_FAIL_ONCE_FILE";
 
 fn init_tracing() {
     // Another test in this binary may already have installed the subscriber; that is fine.
@@ -157,21 +161,40 @@ struct WorkerStage {
 struct FakeWorker {
     endpoint: Endpoint,
     task: JoinHandle<()>,
+    /// Sessions (leader connections) served so far.
+    sessions: Arc<AtomicUsize>,
 }
 
 impl FakeWorker {
     async fn start(stage: WorkerStage) -> Self {
+        Self::start_failing(stage, None).await
+    }
+
+    /// Like [`FakeWorker::start`], but every session's runner exits on receiving step
+    /// `fail_at_step`, if set.
+    async fn start_failing(stage: WorkerStage, fail_at_step: Option<u32>) -> Self {
         let endpoint = bind_endpoint(vec![RPC_BRIDGE_ALPN.to_vec()], None).await;
         let accepting = endpoint.clone();
+        let sessions = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&sessions);
         let task = tokio::spawn(async move {
             while let Some(incoming) = accepting.accept().await {
                 let Ok(connection) = incoming.await else {
                     continue;
                 };
-                tokio::spawn(serve_session(connection, stage));
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(serve_session(connection, stage, fail_at_step));
             }
         });
-        Self { endpoint, task }
+        Self {
+            endpoint,
+            task,
+            sessions,
+        }
+    }
+
+    fn sessions(&self) -> usize {
+        self.sessions.load(Ordering::SeqCst)
     }
 
     async fn stop(self) {
@@ -181,12 +204,14 @@ impl FakeWorker {
 }
 
 /// One worker session: preface, runner, metadata with `model_sha256`, then a byte relay.
-async fn serve_session(connection: Connection, stage: WorkerStage) {
+async fn serve_session(connection: Connection, stage: WorkerStage, fail_at_step: Option<u32>) {
     let Ok((mut send, mut recv)) = connection.accept_bi().await else {
         return;
     };
     wire::read_preface(&mut recv).await.expect("client preface");
+    let fail_env = fail_at_step.map(|step| (FAIL_AT_STEP_ENV, step.to_string()));
     let mut child = Command::new(example_bin("fake_shard_runner"))
+        .envs(fail_env)
         .arg(fixture_model())
         .args([
             stage.begin.to_string(),
@@ -459,13 +484,33 @@ async fn consecutive_requests_use_fresh_runners() {
     assert_eq!(pids.len(), 2, "each request needs its own runner: {lines}");
 }
 
+/// Runners that received step 0, one line each, from a `FAKE_SHARD_LOG` file (then removed).
+fn runner_starts(log: &Path) -> Vec<String> {
+    let lines = std::fs::read_to_string(log).expect("read runner log");
+    std::fs::remove_file(log).expect("remove runner log");
+    lines
+        .lines()
+        .filter(|line| line.contains(" step=0 "))
+        .map(str::to_owned)
+        .collect()
+}
+
 #[tokio::test]
-async fn runner_failure_mid_generation_fails_the_request() {
+async fn runner_failure_mid_generation_fails_the_request_after_the_retries() {
+    let log = temp_path("headers.log");
+    let log_text = log.to_string_lossy().into_owned();
     let model = fixture_model();
-    let stage = local_stage(0, LAYERS, &model, &[(FAIL_AT_STEP_ENV, "2")]);
+    let env = [(FAIL_AT_STEP_ENV, "2"), (LOG_ENV, log_text.as_str())];
+    let stage = local_stage(0, LAYERS, &model, &env);
     let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, vec![stage]), &[]).await;
     let message = frontend.chat_error(false).await;
     assert!(message.contains("step 2"), "{message}");
+    let attempts = MAX_GENERATION_RETRIES as usize + 1;
+    assert!(
+        message.contains(&format!("after {attempts} attempts")),
+        "{message}"
+    );
+    assert_eq!(runner_starts(&log).len(), attempts);
 
     let (status, body) = frontend.chat(true, "hi").await;
     assert_eq!(status, 200, "{body}");
@@ -477,7 +522,162 @@ async fn runner_failure_mid_generation_fails_the_request() {
         body.contains("\"content\":\"H\""),
         "text before the failure streams: {body}"
     );
+    // Each attempt adds two tokens before it fails, and none is streamed twice.
+    let pieces: String = payloads
+        .iter()
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .filter_map(|chunk| {
+            chunk["choices"][0]["delta"]["content"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(pieces, fixture_reply()[..2 * attempts], "{body}");
+    assert_eq!(runner_starts(&log).len(), attempts);
     frontend.stop().await;
+}
+
+#[tokio::test]
+async fn a_stage_failing_once_is_resumed_without_repeating_text() {
+    let worker = FakeWorker::start(WorkerStage {
+        begin: 0,
+        end: 2,
+        model_sha256: Some(FIXTURE_SHA),
+    })
+    .await;
+    let model = fixture_model();
+    let marker = temp_path("fail-once");
+    let marker_text = marker.to_string_lossy().into_owned();
+    let env = [(FAIL_AT_STEP_ENV, "3"), (FAIL_ONCE_FILE_ENV, &marker_text)];
+    let stages = vec![
+        remote_stage(0, 2, &worker.endpoint),
+        local_stage(2, LAYERS, &model, &env),
+    ];
+    let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &[&worker]).await;
+    let (status, body) = frontend.chat(true, "hi").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(streamed_text(&body), fixture_reply(), "{body}");
+    assert!(marker.exists(), "the first attempt failed");
+    // The prefix worker was not at fault, so the retry dialled it again.
+    assert_eq!(worker.sessions(), 2);
+
+    std::fs::remove_file(&marker).expect("remove marker");
+    let completion = frontend.chat_ok().await;
+    assert_completion(&completion);
+    let reply_len = fixture_reply().len();
+    assert_eq!(completion["usage"]["completion_tokens"], reply_len);
+    assert_eq!(worker.sessions(), 4);
+    frontend.stop().await;
+    worker.stop().await;
+    std::fs::remove_file(&marker).expect("remove marker");
+}
+
+/// A remote stage served by `primary`, with `standby` workers behind it.
+fn remote_stage_with_standby(
+    begin: u32,
+    end: u32,
+    primary: String,
+    standby: &[&Endpoint],
+) -> Value {
+    let standby: Vec<String> = standby
+        .iter()
+        .map(|worker| worker.id().to_string())
+        .collect();
+    json!({"begin": begin, "end": end, "remote": {"worker": primary, "standby": standby}})
+}
+
+/// The id of a worker nobody runs, which no lookup can find.
+fn unreachable_worker_id() -> String {
+    iroh::SecretKey::generate().public().to_string()
+}
+
+const PREFIX: WorkerStage = WorkerStage {
+    begin: 0,
+    end: 2,
+    model_sha256: Some(FIXTURE_SHA),
+};
+
+#[tokio::test]
+async fn an_unreachable_primary_hands_its_stage_to_the_standby() {
+    let standby = FakeWorker::start(PREFIX).await;
+    let model = fixture_model();
+    let stages = vec![
+        remote_stage_with_standby(0, 2, unreachable_worker_id(), &[&standby.endpoint]),
+        local_stage(2, LAYERS, &model, &[]),
+    ];
+    let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &[&standby]).await;
+    assert_completion(&frontend.chat_ok().await);
+    assert_eq!(standby.sessions(), 1);
+    frontend.stop().await;
+    standby.stop().await;
+}
+
+#[tokio::test]
+async fn a_primary_failing_mid_generation_is_replaced_by_its_standby() {
+    let primary = FakeWorker::start_failing(PREFIX, Some(3)).await;
+    let standby = FakeWorker::start(PREFIX).await;
+    let model = fixture_model();
+    let primary_id = primary.endpoint.id().to_string();
+    let stages = vec![
+        remote_stage_with_standby(0, 2, primary_id, &[&standby.endpoint]),
+        local_stage(2, LAYERS, &model, &[]),
+    ];
+    let workers = [&primary, &standby];
+    let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &workers).await;
+    let (status, body) = frontend.chat(true, "hi").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(streamed_text(&body), fixture_reply(), "{body}");
+    assert_eq!((primary.sessions(), standby.sessions()), (1, 1));
+    frontend.stop().await;
+    primary.stop().await;
+    standby.stop().await;
+}
+
+#[tokio::test]
+async fn a_stage_whose_workers_all_fail_ends_the_generation() {
+    let primary = FakeWorker::start_failing(PREFIX, Some(3)).await;
+    let standby = FakeWorker::start_failing(PREFIX, Some(3)).await;
+    let model = fixture_model();
+    let primary_id = primary.endpoint.id().to_string();
+    let stages = vec![
+        remote_stage_with_standby(0, 2, primary_id, &[&standby.endpoint]),
+        local_stage(2, LAYERS, &model, &[]),
+    ];
+    let workers = [&primary, &standby];
+    let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &workers).await;
+    let message = frontend.chat_error(false).await;
+    assert!(
+        message.contains("every worker for stage 0..2 has failed"),
+        "{message}"
+    );
+    assert_eq!((primary.sessions(), standby.sessions()), (1, 1));
+    frontend.stop().await;
+    primary.stop().await;
+    standby.stop().await;
+}
+
+#[tokio::test]
+async fn a_fatal_error_is_not_retried_or_failed_over() {
+    let wrong_model = FakeWorker::start(WorkerStage {
+        model_sha256: Some(OTHER_SHA),
+        ..PREFIX
+    })
+    .await;
+    let standby = FakeWorker::start(PREFIX).await;
+    let model = fixture_model();
+    let primary_id = wrong_model.endpoint.id().to_string();
+    let stages = vec![
+        remote_stage_with_standby(0, 2, primary_id, &[&standby.endpoint]),
+        local_stage(2, LAYERS, &model, &[]),
+    ];
+    let workers = [&wrong_model, &standby];
+    let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &workers).await;
+    let message = frontend.chat_error(false).await;
+    assert!(message.contains("relay model_sha256"), "{message}");
+    assert_eq!((wrong_model.sessions(), standby.sessions()), (1, 0));
+    frontend.stop().await;
+    wrong_model.stop().await;
+    standby.stop().await;
 }
 
 #[tokio::test]
@@ -656,8 +856,18 @@ async fn local_links(
     context: u32,
     prompt: &str,
 ) -> Vec<StageLink> {
+    local_links_with_env(model, ranges, context, prompt, &BTreeMap::new()).await
+}
+
+/// [`local_links`] with extra runner environment.
+async fn local_links_with_env(
+    model: &Path,
+    ranges: &[(u32, u32)],
+    context: u32,
+    prompt: &str,
+    env: &BTreeMap<String, String>,
+) -> Vec<StageLink> {
     let runner = example_bin("fake_shard_runner");
-    let env = BTreeMap::new();
     let mut links = Vec::new();
     for &(begin, end) in ranges {
         let launch = LocalLaunch {
@@ -669,7 +879,7 @@ async fn local_links(
             gpu_layers: 0,
             budget_bytes: BUDGET_BYTES,
             prompt,
-            env: &env,
+            env,
         };
         links.push(
             StageLink::spawn_local(&launch, IO_TIMEOUT)
@@ -789,6 +999,79 @@ async fn pipeline_stops_at_max_tokens_and_at_the_context_limit() {
     assert_eq!(generation.completion_tokens, context - 2);
     assert_eq!(generation.text, "x".repeat(30));
     std::fs::remove_file(&model).expect("remove plain model");
+}
+
+#[tokio::test]
+async fn a_resumed_pipeline_counts_limits_over_every_attempt() {
+    init_tracing();
+    let whole = [(0, LAYERS)];
+    let marker = temp_path("fail-once");
+    let env = BTreeMap::from([
+        (FAIL_AT_STEP_ENV.to_owned(), "3".to_owned()),
+        (
+            FAIL_ONCE_FILE_ENV.to_owned(),
+            marker.to_string_lossy().into_owned(),
+        ),
+    ]);
+    let model = fixture_model();
+    let pipeline_for = |prompt: &'static str| {
+        let (model, env) = (&model, &env);
+        async move {
+            let links = local_links_with_env(model, &whole, CONTEXT, prompt, env).await;
+            Pipeline::new(links, &expectations(&whole, false))
+                .expect("valid pipeline")
+                .with_step_timeout(IO_TIMEOUT)
+        }
+    };
+    let limits = GenerationLimits {
+        max_tokens: 5,
+        context: CONTEXT,
+    };
+    let mut pieces = Vec::new();
+    let mut state = GenerationState::new(limits, |text: String| {
+        pieces.push(text);
+        std::future::ready(())
+    });
+
+    // Steps 0..=2 sample "Hel", then the runner exits on step 3.
+    let error = pipeline_for("hi")
+        .await
+        .resume(&mut state)
+        .await
+        .expect_err("step 3 fails");
+    let classified = classify(&error);
+    assert_eq!(classified.class, FailureClass::Retryable, "{error:#}");
+    assert_eq!(classified.fault.map(|fault| fault.stage), Some(0));
+    assert_eq!(state.completion_tokens(), 3);
+
+    // A final stage that tokenizes the prompt differently cannot continue it.
+    let error = pipeline_for("ho")
+        .await
+        .resume(&mut state)
+        .await
+        .expect_err("prompt mismatch");
+    assert_eq!(classify(&error).class, FailureClass::Fatal, "{error:#}");
+    assert!(
+        format!("{error:#}").contains("tokenized the prompt"),
+        "{error:#}"
+    );
+
+    // max_tokens counts the first attempt's three tokens too.
+    let generation = timeout(TEST_TIMEOUT, pipeline_for("hi").await.resume(&mut state))
+        .await
+        .expect("resume timed out")
+        .expect("resume succeeds");
+    drop(state);
+    assert_eq!(
+        (
+            generation.text.as_str(),
+            generation.finish,
+            generation.completion_tokens
+        ),
+        ("Hello", FinishReason::Length, 5)
+    );
+    assert_eq!(pieces, ["H", "e", "l", "l", "o"]);
+    std::fs::remove_file(&marker).expect("remove marker");
 }
 
 #[tokio::test]

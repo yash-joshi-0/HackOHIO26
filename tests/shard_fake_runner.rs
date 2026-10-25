@@ -264,3 +264,53 @@ async fn fail_at_step_env_fails_that_step() {
     let stderr = finish_failed(stage).await;
     assert!(stderr.contains("FAKE_SHARD_FAIL_AT_STEP"), "{stderr}");
 }
+
+#[tokio::test]
+async fn a_prefill_past_the_prompt_continues_the_reply() {
+    let reply = fixture_reply();
+    let mut stages = vec![spawn_stage(0, 4, &[]).await];
+    let mut history = stages[0].meta.tokens.clone();
+    // As a resume would: the prompt plus the first two reply tokens in one prefill batch.
+    history.extend(reply[..2].iter().map(|&byte| u32::from(byte) + 1));
+    let next = run_step(&mut stages, 0, 0, &history).await;
+    assert_eq!(next.piece_bytes().expect("piece bytes"), [reply[2]]);
+    finish_ok(stages.pop().expect("one stage")).await;
+
+    // A wrong token past the prompt is refused even inside a prefill batch.
+    let mut stage = spawn_stage(0, 4, &[]).await;
+    let mut history = stage.meta.tokens.clone();
+    history.push(u32::from(reply[0]) + 2);
+    wire::write_request(&mut stage.stdin, 0, 0, &StageInput::Tokens(&history))
+        .await
+        .expect("write request");
+    let stderr = finish_failed(stage).await;
+    assert!(stderr.contains("fed back wrong token"), "{stderr}");
+}
+
+#[tokio::test]
+async fn fail_once_file_limits_the_failure_to_the_first_runner() {
+    let marker =
+        std::env::temp_dir().join(format!("fake-shard-fail-once-{}", uuid::Uuid::new_v4()));
+    let marker_text = marker.to_string_lossy().into_owned();
+    let envs = [
+        ("FAKE_SHARD_FAIL_AT_STEP", "0"),
+        ("FAKE_SHARD_FAIL_ONCE_FILE", marker_text.as_str()),
+    ];
+    let mut first = spawn_stage(0, 4, &envs).await;
+    let tokens = first.meta.tokens.clone();
+    wire::write_request(&mut first.stdin, 0, 0, &StageInput::Tokens(&tokens))
+        .await
+        .expect("write request");
+    let stderr = finish_failed(first).await;
+    assert!(stderr.contains("FAKE_SHARD_FAIL_AT_STEP"), "{stderr}");
+    assert!(marker.exists(), "the first runner leaves the marker");
+
+    let mut second = vec![spawn_stage(0, 4, &envs).await];
+    let reply = run_step(&mut second, 0, 0, &tokens).await;
+    assert_eq!(
+        reply.piece_bytes().expect("piece bytes"),
+        fixture_reply()[..1]
+    );
+    finish_ok(second.pop().expect("one stage")).await;
+    std::fs::remove_file(&marker).expect("remove marker");
+}

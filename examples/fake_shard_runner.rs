@@ -14,12 +14,17 @@
 //!   "broken stage chain" otherwise; a non-final stage then outputs rows of `t + END`.
 //! - The final stage (`END == layers`) emits the reply bytes in order, one per step, starting
 //!   with the step that reaches the end of its own prompt (earlier prefill steps return token 0
-//!   with an empty piece), then end-of-generation (`vocab - 1`). Every decode input must be the
-//!   token it emitted on the previous step, or it exits with "fed back wrong token".
+//!   with an empty piece), then end-of-generation (`vocab - 1`). Every input past the prompt
+//!   must be the reply token for its position, or it exits with "fed back wrong token". So a
+//!   resumed generation (prompt plus already generated tokens in one prefill) continues the
+//!   reply where it left off, as a real model would. A final stage whose own prompt is not the
+//!   one being run (a ring terminal gets a placeholder) starts the reply after that step.
 //! - Like the real runner it enforces step/position order, batch sizes, the context bound and the
 //!   opcode for its stage, and exits 1 with a message on stderr on any violation.
 //!
-//! Environment: `FAKE_SHARD_FAIL_AT_STEP=<n>` exits 1 on receiving step `n`.
+//! Environment: `FAKE_SHARD_FAIL_AT_STEP=<n>` exits 1 on receiving step `n`. With
+//! `FAKE_SHARD_FAIL_ONCE_FILE=<path>` as well, only the first runner to reach that step fails:
+//! it creates `<path>`, and a runner that finds the file already there carries on.
 //! `FAKE_SHARD_DELAY_AT_STEP_MS=<ms>` delays each step before replying.
 //! `FAKE_SHARD_LOG=<path>` appends `<pid> <begin>:<end> step=<s> position=<p> count=<n>` per
 //! received request header.
@@ -62,6 +67,9 @@ const NO_TOKEN: i64 = -1;
 const FAIL_AT_STEP_ENV: &str = "FAKE_SHARD_FAIL_AT_STEP";
 const DELAY_AT_STEP_ENV: &str = "FAKE_SHARD_DELAY_AT_STEP_MS";
 
+/// Marker file that limits `FAKE_SHARD_FAIL_AT_STEP` to the first runner that reaches it.
+const FAIL_ONCE_FILE_ENV: &str = "FAKE_SHARD_FAIL_ONCE_FILE";
+
 /// Path to append one line per received request header.
 const LOG_ENV: &str = "FAKE_SHARD_LOG";
 
@@ -96,11 +104,14 @@ struct Stage {
     prompt_tokens: Vec<u32>,
     fail_at_step: Option<u32>,
     delay_at_step: Duration,
+    fail_once_file: Option<PathBuf>,
     log: Option<PathBuf>,
     expected_step: u32,
     expected_position: u32,
-    reply_index: usize,
-    last_emitted: Option<u32>,
+    /// Position of the first reply token, fixed by the batch that reaches the prompt's end.
+    reply_anchor: Option<u32>,
+    /// Whether every input so far at a prompt position was this stage's own prompt token.
+    own_prompt: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -220,11 +231,12 @@ impl Stage {
             prompt_tokens: tokenize(&args.prompt),
             fail_at_step,
             delay_at_step,
+            fail_once_file: std::env::var_os(FAIL_ONCE_FILE_ENV).map(PathBuf::from),
             log: std::env::var_os(LOG_ENV).map(PathBuf::from),
             expected_step: 0,
             expected_position: 0,
-            reply_index: 0,
-            last_emitted: None,
+            reply_anchor: None,
+            own_prompt: true,
         })
     }
 
@@ -261,7 +273,7 @@ impl Stage {
         W: AsyncWrite + Unpin,
     {
         self.log_header(&header)?;
-        if self.fail_at_step == Some(header.step) {
+        if self.fail_at_step == Some(header.step) && self.first_to_fail()? {
             bail!("{FAIL_AT_STEP_ENV} reached at step {}", header.step);
         }
         self.check_order(&header)?;
@@ -278,6 +290,21 @@ impl Stage {
         self.expected_step += 1;
         self.expected_position += header.token_count;
         Ok(())
+    }
+
+    /// Whether this runner should fail: always without a fail-once file, otherwise only if it
+    /// is the one that creates the file.
+    fn first_to_fail(&self) -> anyhow::Result<bool> {
+        let Some(path) = &self.fail_once_file else {
+            return Ok(true);
+        };
+        match OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to create {}", path.display()))
+            }
+        }
     }
 
     fn log_header(&self, header: &RequestHeader) -> anyhow::Result<()> {
@@ -373,28 +400,57 @@ impl Stage {
         (reply, floats)
     }
 
-    /// The final stage: the next reply byte once the prompt has been seen.
+    /// The final stage: once the prompt has been seen, the reply byte for the position after
+    /// the batch. Inputs past the reply's start must be the reply tokens for their positions.
     fn sample(&mut self, header: &RequestHeader, tokens: &[u32]) -> anyhow::Result<StepReply> {
-        let prompt_len = u32::try_from(self.prompt_tokens.len()).unwrap_or(u32::MAX);
-        if header.position >= prompt_len {
-            ensure!(
-                tokens.len() == 1 && self.last_emitted == Some(tokens[0]),
-                "fed back wrong token {tokens:?}; last emitted {:?}",
-                self.last_emitted
-            );
-        }
-        if header.position + header.token_count < prompt_len {
-            let token = i64::from(PREFILL_TOKEN);
-            return Ok(step_reply(header.step, 0, token, false, &[]));
-        }
-        let next = self.model.reply.as_bytes().get(self.reply_index).copied();
-        let (token, eog, piece) = match next {
-            Some(byte) => (u32::from(byte) + 1, false, vec![byte]),
-            None => (self.model.vocab - 1, true, Vec::new()),
+        let end = header.position + header.token_count;
+        let anchor = match self.reply_anchor {
+            Some(anchor) => anchor,
+            None => {
+                self.note_prompt(header.position, tokens);
+                let prompt_len = u32::try_from(self.prompt_tokens.len()).unwrap_or(u32::MAX);
+                if end < prompt_len {
+                    let token = i64::from(PREFILL_TOKEN);
+                    return Ok(step_reply(header.step, 0, token, false, &[]));
+                }
+                // The stage's own prompt is the one being run: the reply starts right after
+                // it, even inside this batch (a resume). Otherwise (a ring terminal started
+                // with a placeholder prompt) it starts after this batch.
+                let anchor = if self.own_prompt { prompt_len } else { end };
+                self.reply_anchor = Some(anchor);
+                anchor
+            }
         };
-        self.reply_index += 1;
-        self.last_emitted = Some(token);
+        for (position, &token) in (header.position..).zip(tokens) {
+            if let Some(index) = position.checked_sub(anchor) {
+                let (expected, _) = self.reply_token(index as usize);
+                ensure!(
+                    token == expected,
+                    "fed back wrong token {token} at position {position}; emitted {expected}"
+                );
+            }
+        }
+        let (token, piece) = self.reply_token((end - anchor) as usize);
+        let eog = piece.is_none();
+        let piece: Vec<u8> = piece.into_iter().collect();
         Ok(step_reply(header.step, 0, i64::from(token), eog, &piece))
+    }
+
+    /// Notes whether the inputs at prompt positions are this stage's own prompt tokens.
+    fn note_prompt(&mut self, position: u32, tokens: &[u32]) {
+        for (position, &token) in (position as usize..).zip(tokens) {
+            if let Some(&own) = self.prompt_tokens.get(position) {
+                self.own_prompt &= own == token;
+            }
+        }
+    }
+
+    /// The token emitted at `index` of the reply and its byte, or end-of-generation (no byte).
+    fn reply_token(&self, index: usize) -> (u32, Option<u8>) {
+        match self.model.reply.as_bytes().get(index) {
+            Some(&byte) => (u32::from(byte) + 1, Some(byte)),
+            None => (self.model.vocab - 1, None),
+        }
     }
 }
 

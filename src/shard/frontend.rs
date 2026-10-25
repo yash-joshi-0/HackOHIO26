@@ -14,19 +14,25 @@
 //! shard-ring session ([`RingLink`]); [`FrontendConfig::ring`] must then carry the registry the
 //! leader's endpoint delivers result channels to.
 //!
-//! One generation runs at a time; later requests wait for the lock. A failure before any
-//! response bytes are sent is a JSON error with a 5xx status (400 for a prompt longer than
-//! the context). A failure mid-stream sends an SSE `error` event and ends without `[DONE]`,
-//! which makes the job API fail the job without committing history. A client that disconnects
-//! drops its generation, which kills the local runners and closes the remote streams.
+//! One generation runs at a time; later requests wait for the lock. In pipeline execution a
+//! retryable failure (see [`crate::shard::pipeline::classify`]) resumes the generation on fresh
+//! links, up to [`MAX_GENERATION_RETRIES`] times: completed text is never sent twice, a remote
+//! worker that failed is replaced by the stage's next standby, and local stages are started
+//! again. Ring execution is never retried: any ring failure fails the generation.
+//! A fatal failure, or one that exhausts the retries, before any response bytes are sent is
+//! a JSON error with a 5xx status (400 for a prompt longer than the context). One mid-stream
+//! sends an SSE `error` event and ends without `[DONE]`, which makes the job API fail the job
+//! without committing history. A client that disconnects cancels its generation at once, with
+//! no retry, which kills the local runners and closes the remote streams.
 
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard, PoisonError};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
@@ -42,14 +48,18 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{info, warn};
+
+use iroh::EndpointId;
 
 use crate::api::CHAT_COMPLETIONS_PATH;
 use crate::shard::manifest::{ShardManifest, StageLocation, StageSpec};
 use crate::shard::manifest::{same_sha256, sha256_file};
 use crate::shard::pipeline::{
-    FinishReason, Generation, GenerationCancelled, GenerationLimits, LocalLaunch, METADATA_TIMEOUT,
-    Pipeline, PromptTooLong, StageExpectation, StageIdentity, StageLink,
+    FailureClass, FinishReason, Generation, GenerationCancelled, GenerationLimits, GenerationState,
+    LocalLaunch, METADATA_TIMEOUT, Pipeline, PromptTooLong, StageExpectation, StageIdentity,
+    StageLink, classify,
 };
 use crate::shard::ring_origin::{RingLink, RingPlan, RingSettings};
 use crate::shard::template::{ChatMessage, ChatRenderer};
@@ -74,6 +84,15 @@ const NO_CACHE: &str = "no-cache";
 
 /// Bounds queued text chunks when a client reads more slowly than inference produces.
 const GENERATION_EVENT_BUFFER: usize = 16;
+
+/// Attempts after the first that one generation may make after retryable failures.
+pub const MAX_GENERATION_RETRIES: u32 = 2;
+
+/// Delay before the first retry; it doubles before each later one.
+const RETRY_BACKOFF: Duration = Duration::from_millis(250);
+
+/// No retry starts once this long has passed since the generation began.
+const RETRY_DEADLINE: Duration = Duration::from_secs(15 * 60);
 
 /// Where the frontend listens, what it serves, and the endpoint remote stages are dialled from.
 pub struct FrontendConfig {
@@ -498,8 +517,25 @@ async fn run_generation(
     let _ = events.send(event).await;
 }
 
+/// Runs one generation: a single attempt in ring execution, which is never retried, or the
+/// retrying pipeline generation otherwise.
 async fn generate(
     state: &FrontendState,
+    prompt: &str,
+    max_tokens: u32,
+    events: &Sender<Event>,
+    cancel: oneshot::Receiver<()>,
+) -> anyhow::Result<Generation> {
+    match &state.ring {
+        Some(ring) => generate_ring(state, ring, prompt, max_tokens, events, cancel).await,
+        None => generate_pipeline(state, prompt, max_tokens, events, cancel).await,
+    }
+}
+
+/// Ring execution (EXPERIMENTAL): one attempt; any failure fails the generation.
+async fn generate_ring(
+    state: &FrontendState,
+    ring: &RingRuntime,
     prompt: &str,
     max_tokens: u32,
     events: &Sender<Event>,
@@ -508,12 +544,7 @@ async fn generate(
     let opened = tokio::select! {
         biased;
         _ = &mut cancel => return Err(GenerationCancelled.into()),
-        pipeline = async {
-            match &state.ring {
-                None => open_pipeline(state, prompt).await,
-                Some(ring) => open_ring_pipeline(state, ring, prompt).await,
-            }
-        } => pipeline,
+        pipeline = open_ring_pipeline(state, ring, prompt) => pipeline,
     };
     let pipeline = opened?;
     let context = state.manifest.context;
@@ -540,19 +571,6 @@ async fn generate(
         .await
 }
 
-/// Opens every stage of a pipeline manifest at once and validates them.
-async fn open_pipeline(state: &FrontendState, prompt: &str) -> anyhow::Result<Pipeline> {
-    let links = try_join_all(
-        state
-            .manifest
-            .stages
-            .iter()
-            .map(|stage| open_link(state, stage, prompt)),
-    )
-    .await?;
-    Pipeline::new(links, &state.expectations)
-}
-
 /// Starts the local stage 0 and the ring session at once and validates them together.
 async fn open_ring_pipeline(
     state: &FrontendState,
@@ -566,41 +584,269 @@ async fn open_ring_pipeline(
         .zip(state.expectations.first())
         .context("the ring manifest has no local stage")?;
     let (local, link) = tokio::try_join!(
-        open_link(state, stage, prompt),
+        spawn_local_stage(state, stage, prompt),
         RingLink::open(&state.endpoint, &ring.plan, &ring.settings),
     )?;
     Pipeline::with_ring(local, link, expected)
 }
 
-async fn open_link(
+/// Starts a fresh local runner for a local stage.
+async fn spawn_local_stage(
     state: &FrontendState,
     stage: &StageSpec,
     prompt: &str,
 ) -> anyhow::Result<StageLink> {
-    match &stage.location {
-        StageLocation::Remote { worker } => {
-            StageLink::connect_remote(&state.endpoint, *worker, METADATA_TIMEOUT).await
+    let StageLocation::Local {
+        model,
+        gpu_layers,
+        budget_bytes,
+        env,
+        ..
+    } = &stage.location
+    else {
+        bail!("stage {}..{} is not local", stage.begin, stage.end);
+    };
+    let launch = LocalLaunch {
+        runner: &state.manifest.runner,
+        model,
+        begin: stage.begin,
+        end: stage.end,
+        context: state.manifest.context,
+        gpu_layers: *gpu_layers,
+        budget_bytes: *budget_bytes,
+        prompt,
+        env,
+    };
+    StageLink::spawn_local(&launch, METADATA_TIMEOUT).await
+}
+
+/// Pipeline execution: resumes the generation on fresh links after a retryable failure (up to
+/// [`MAX_GENERATION_RETRIES`] times, backing off between attempts, and starting no attempt
+/// after [`RETRY_DEADLINE`]). A remote worker that failed is not dialled again for this
+/// generation; local stages are simply started again. A client disconnect ends it at once.
+async fn generate_pipeline(
+    state: &FrontendState,
+    prompt: &str,
+    max_tokens: u32,
+    events: &Sender<Event>,
+    mut cancel: oneshot::Receiver<()>,
+) -> anyhow::Result<Generation> {
+    let limits = GenerationLimits {
+        max_tokens,
+        context: state.manifest.context,
+    };
+    let mut progress = GenerationState::new(limits, |text: String| {
+        let events = events.clone();
+        async move {
+            // A send fails only once the handler is gone (the client disconnected).
+            let _ = events.send(Event::Text(text)).await;
         }
-        StageLocation::Local {
-            model,
-            gpu_layers,
-            budget_bytes,
-            env,
-            ..
-        } => {
-            let launch = LocalLaunch {
-                runner: &state.manifest.runner,
-                model,
-                begin: stage.begin,
-                end: stage.end,
-                context: state.manifest.context,
-                gpu_layers: *gpu_layers,
-                budget_bytes: *budget_bytes,
-                prompt,
-                env,
+    });
+    let excluded = StdMutex::new(HashSet::new());
+    let attempt = AttemptContext {
+        state,
+        prompt,
+        events,
+        excluded: &excluded,
+    };
+    let mut budget = RetryBudget::new();
+    let mut started = false;
+    loop {
+        let error = match attempt.run(&mut progress, &mut started, &mut cancel).await {
+            Ok(generation) => return Ok(generation),
+            Err(error) => error,
+        };
+        let fault = attempt.retryable_fault(error)?;
+        let Some(delay) = budget.next_delay() else {
+            let attempts = budget.attempts();
+            return Err(fault
+                .error
+                .context(format!("generation failed after {attempts} attempts")));
+        };
+        warn!(
+            attempt = budget.attempts(),
+            stage = ?fault.stage,
+            worker = ?fault.worker.map(|worker| worker.fmt_short().to_string()),
+            completion_tokens = progress.completion_tokens(),
+            error = %format!("{:#}", fault.error),
+            "shard generation attempt failed; retrying on fresh links in {delay:?}"
+        );
+        tokio::select! {
+            biased;
+            _ = &mut cancel => return Err(GenerationCancelled.into()),
+            () = tokio::time::sleep(delay) => {}
+        }
+    }
+}
+
+/// A failed attempt worth retrying, and where it failed when known.
+struct RetryableFault {
+    error: anyhow::Error,
+    stage: Option<usize>,
+    worker: Option<EndpointId>,
+}
+
+/// How many more attempts a generation may make, and how long it waits before each.
+struct RetryBudget {
+    retries: u32,
+    backoff: Duration,
+    give_up_at: Instant,
+}
+
+impl RetryBudget {
+    fn new() -> Self {
+        Self {
+            retries: 0,
+            backoff: RETRY_BACKOFF,
+            give_up_at: Instant::now() + RETRY_DEADLINE,
+        }
+    }
+
+    /// Attempts started so far.
+    fn attempts(&self) -> u32 {
+        self.retries + 1
+    }
+
+    /// Spends one retry and returns the delay before it, or `None` once the retries are used
+    /// up or the retry would start after the deadline.
+    fn next_delay(&mut self) -> Option<Duration> {
+        let delay = self.backoff;
+        if self.retries >= MAX_GENERATION_RETRIES || Instant::now() + delay > self.give_up_at {
+            return None;
+        }
+        self.retries += 1;
+        self.backoff *= 2;
+        Some(delay)
+    }
+}
+
+/// Remote workers that failed during the current generation and are not dialled again.
+type Excluded = StdMutex<HashSet<EndpointId>>;
+
+/// Locks the excluded set. It is never held across an await, and a poisoned lock still
+/// holds a usable set, so poisoning is ignored.
+fn lock(excluded: &Excluded) -> MutexGuard<'_, HashSet<EndpointId>> {
+    excluded.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What one attempt of a generation needs from its caller.
+struct AttemptContext<'a> {
+    state: &'a FrontendState,
+    prompt: &'a str,
+    events: &'a Sender<Event>,
+    excluded: &'a Excluded,
+}
+
+impl AttemptContext<'_> {
+    /// Classifies a failed attempt and excludes the remote worker it blames. Returns the
+    /// error itself when a retry cannot help: it is fatal, or a remote stage has no worker
+    /// left to try.
+    fn retryable_fault(&self, error: anyhow::Error) -> anyhow::Result<RetryableFault> {
+        let classified = classify(&error);
+        if classified.class == FailureClass::Fatal {
+            return Err(error);
+        }
+        let worker = classified.fault.and_then(|fault| fault.worker);
+        let mut excluded = lock(self.excluded);
+        excluded.extend(worker);
+        let exhausted = self.state.manifest.stages.iter().find(|stage| {
+            !stage.is_local()
+                && stage
+                    .remote_candidates()
+                    .iter()
+                    .all(|candidate| excluded.contains(candidate))
+        });
+        if let Some(stage) = exhausted {
+            let (begin, end) = (stage.begin, stage.end);
+            return Err(error.context(format!("every worker for stage {begin}..{end} has failed")));
+        }
+        Ok(RetryableFault {
+            error,
+            stage: classified.fault.map(|fault| fault.stage),
+            worker,
+        })
+    }
+
+    /// Opens every stage link, validates them, and resumes `progress` on them. `Started`
+    /// goes out the first time the links pass validation and the prompt fits. Ends with
+    /// [`GenerationCancelled`] as soon as `cancel` resolves.
+    async fn run<F, Fut>(
+        &self,
+        progress: &mut GenerationState<F, Fut>,
+        started: &mut bool,
+        cancel: &mut oneshot::Receiver<()>,
+    ) -> anyhow::Result<Generation>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let opened = tokio::select! {
+            biased;
+            _ = &mut *cancel => return Err(GenerationCancelled.into()),
+            pipeline = self.open_pipeline() => pipeline,
+        };
+        let pipeline = opened?;
+        // Checked before `Started` so an oversized prompt is still answered with a 400.
+        if let Err(error) = pipeline.ensure_prompt_fits(self.state.manifest.context) {
+            pipeline.close(true).await;
+            return Err(error.into());
+        }
+        if !*started {
+            *started = true;
+            // A send fails only once the handler is gone (the client disconnected).
+            let _ = self.events.send(Event::Started).await;
+        }
+        pipeline.resume_cancellable(progress, cancel).await
+    }
+
+    /// Opens every stage of the pipeline manifest at once and validates them.
+    async fn open_pipeline(&self) -> anyhow::Result<Pipeline> {
+        let stages = &self.state.manifest.stages;
+        let links = try_join_all(stages.iter().map(|stage| self.open_link(stage))).await?;
+        Pipeline::new(links, &self.state.expectations)
+    }
+
+    /// Opens one stage's link: a fresh local runner, or a remote candidate.
+    async fn open_link(&self, stage: &StageSpec) -> anyhow::Result<StageLink> {
+        match &stage.location {
+            StageLocation::Remote { .. } => self.open_remote(stage).await,
+            StageLocation::Local { .. } => spawn_local_stage(self.state, stage, self.prompt).await,
+        }
+    }
+
+    /// Tries the stage's candidates in order (primary, then standbys), skipping excluded
+    /// ones. A candidate that fails with a retryable error is excluded and the next one is
+    /// tried; a fatal error ends the attempt. Returns the last error once none is left.
+    async fn open_remote(&self, stage: &StageSpec) -> anyhow::Result<StageLink> {
+        let mut last_error = None;
+        for worker in stage.remote_candidates() {
+            if lock(self.excluded).contains(&worker) {
+                continue;
+            }
+            let endpoint = &self.state.endpoint;
+            let error = match StageLink::connect_remote(endpoint, worker, METADATA_TIMEOUT).await {
+                Ok(link) => return Ok(link),
+                Err(error) => error,
             };
-            StageLink::spawn_local(&launch, METADATA_TIMEOUT).await
+            if classify(&error).class == FailureClass::Fatal {
+                return Err(error);
+            }
+            warn!(
+                stage = %format!("{}..{}", stage.begin, stage.end),
+                worker = %worker.fmt_short(),
+                error = %format!("{error:#}"),
+                "remote stage worker failed; trying the next candidate"
+            );
+            lock(self.excluded).insert(worker);
+            last_error = Some(error);
         }
+        Err(last_error.unwrap_or_else(|| {
+            anyhow!(
+                "every worker for stage {}..{} has failed",
+                stage.begin,
+                stage.end
+            )
+        }))
     }
 }
 

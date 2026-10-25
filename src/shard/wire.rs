@@ -175,6 +175,17 @@ impl StageMetadata {
     }
 }
 
+/// The peer closed the stream before a whole JSON line arrived: a runner that exited or a
+/// connection that dropped, as opposed to a peer that sent something malformed.
+#[derive(Debug, thiserror::Error)]
+#[error("stream closed {place} the {what} line")]
+pub struct StreamClosed {
+    /// `"before"` or `"in the middle of"`.
+    place: &'static str,
+    /// Which line was expected.
+    what: String,
+}
+
 /// The JSON line the runner sends for each request.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StepReply {
@@ -462,13 +473,19 @@ where
         .await
         .with_context(|| format!("failed to read {what} line"))?;
     if line.last() != Some(&b'\n') {
-        if line.is_empty() {
-            bail!("stream closed before the {what} line");
-        }
         if line.len() > MAX_LINE_BYTES {
             bail!("{what} line exceeds {MAX_LINE_BYTES} bytes");
         }
-        bail!("stream closed in the middle of the {what} line");
+        let place = if line.is_empty() {
+            "before"
+        } else {
+            "in the middle of"
+        };
+        return Err(StreamClosed {
+            place,
+            what: what.to_owned(),
+        }
+        .into());
     }
     serde_json::from_slice(&line).with_context(|| format!("invalid {what} JSON"))
 }

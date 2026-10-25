@@ -18,20 +18,23 @@
 //! ```
 //!
 //! Each stage object carries `begin`, `end` and exactly one location key (`remote` or `local`).
-//! Unknown fields are refused everywhere, so a typo cannot silently drop a setting.
+//! A remote stage may list `"standby": ["<iroh endpoint id>", ...]`: workers holding the same
+//! artifact that are tried, in order, when the primary fails. Unknown fields are refused
+//! everywhere, so a typo cannot silently drop a setting.
 //!
 //! `chat_template` is either `"chatml"` or a pinned Jinja template object (see [`ChatTemplate`]).
 //! [`ShardManifest::load`] resolves a relative template path against the manifest's directory.
 //!
 //! [`ShardManifest::validate`] enforces the structural rules (contiguous coverage of
-//! `0..layers`, bounds on `context` and `max_tokens`, well-formed hashes, no duplicate worker)
-//! and the topology of the manifest's [`Execution`] mode:
+//! `0..layers`, bounds on `context` and `max_tokens`, well-formed hashes, no worker listed
+//! twice, as primary or standby) and the topology of the manifest's [`Execution`] mode:
 //!
 //! - `"execution": "pipeline"` (the default, M-25 v1): a single local whole-model stage, or one
 //!   remote prefix followed by a local final stage.
 //! - `"execution": "ring"` (EXPERIMENTAL, `meshthing/shard-ring/1`): a local stage `0..k` that
 //!   tokenizes, then one or more remote ring workers covering `k..layers` in order. The last
-//!   remote stage is the terminal, which returns tokens straight to the leader.
+//!   remote stage is the terminal, which returns tokens straight to the leader. Ring execution
+//!   fails the job on any error, so its stages may not list `standby` workers.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -208,6 +211,9 @@ pub enum StageLocation {
     Remote {
         /// The worker's Iroh endpoint ID.
         worker: EndpointId,
+        /// Workers that hold the identical stage artifact and take over, in order, when the
+        /// primary cannot be reached or fails mid-generation. Empty by default.
+        standby: Vec<EndpointId>,
     },
     /// In a `shard_runner` child process on this machine.
     Local {
@@ -243,6 +249,8 @@ struct RawStageSpec {
 #[serde(deny_unknown_fields)]
 struct RawRemote {
     worker: EndpointId,
+    #[serde(default)]
+    standby: Vec<EndpointId>,
 }
 
 #[derive(Deserialize)]
@@ -262,7 +270,9 @@ impl<'de> Deserialize<'de> for StageSpec {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = RawStageSpec::deserialize(deserializer)?;
         let location = match (raw.remote, raw.local) {
-            (Some(RawRemote { worker }), None) => StageLocation::Remote { worker },
+            (Some(RawRemote { worker, standby }), None) => {
+                StageLocation::Remote { worker, standby }
+            }
             (None, Some(local)) => StageLocation::Local {
                 model: local.model,
                 gpu_layers: local.gpu_layers,
@@ -298,8 +308,19 @@ impl StageSpec {
     /// The remote worker serving this stage, if any.
     pub fn remote_worker(&self) -> Option<EndpointId> {
         match self.location {
-            StageLocation::Remote { worker } => Some(worker),
+            StageLocation::Remote { worker, .. } => Some(worker),
             _ => None,
+        }
+    }
+
+    /// Every worker that may serve this remote stage, in the order they are tried: the
+    /// primary, then its standbys. Empty for a local stage.
+    pub fn remote_candidates(&self) -> Vec<EndpointId> {
+        match &self.location {
+            StageLocation::Remote { worker, standby } => std::iter::once(*worker)
+                .chain(standby.iter().copied())
+                .collect(),
+            _ => Vec::new(),
         }
     }
 }
@@ -333,11 +354,12 @@ impl ShardManifest {
         self.execution == Execution::Ring
     }
 
-    /// Remote workers in stage order.
+    /// Every remote worker the front end may dial, in stage order: each remote stage's
+    /// primary followed by its standbys.
     pub fn remote_workers(&self) -> Vec<EndpointId> {
         self.stages
             .iter()
-            .filter_map(StageSpec::remote_worker)
+            .flat_map(StageSpec::remote_candidates)
             .collect()
     }
 
@@ -386,11 +408,16 @@ impl ShardManifest {
         let mut workers = HashSet::new();
         for stage in &self.stages {
             match &stage.location {
-                StageLocation::Remote { worker } => ensure!(
-                    workers.insert(*worker),
-                    "worker {} serves more than one stage",
-                    worker.fmt_short()
-                ),
+                StageLocation::Remote { .. } => {
+                    for worker in stage.remote_candidates() {
+                        ensure!(
+                            workers.insert(worker),
+                            "worker {} is listed more than once: a worker may not serve more \
+                             than one stage, as primary or standby",
+                            worker.fmt_short()
+                        );
+                    }
+                }
                 StageLocation::Local {
                     budget_bytes,
                     artifact_sha256,
@@ -460,6 +487,18 @@ impl ShardManifest {
                  every later stage must be a remote ring worker",
                 local.begin,
                 local.end
+            );
+        }
+        if let Some(stage) = rest
+            .iter()
+            .find(|stage| stage.remote_candidates().len() > 1)
+        {
+            bail!(
+                "ring execution does not support standby workers (stage {}..{} lists some): \
+                 a failed ring job fails rather than retrying; use \"execution\": \"pipeline\" \
+                 for standby failover",
+                stage.begin,
+                stage.end
             );
         }
         Ok(())
@@ -730,7 +769,59 @@ mod tests {
     fn duplicate_workers_are_refused() {
         // Duplicates are checked before the v1 topology rules, so this is reported first.
         let value = manifest_json(vec![remote(0, 1, 7), remote(1, 2, 7), local(2, 4)]);
-        assert!(error_of(value).contains("more than one stage"));
+        assert!(error_of(value).contains("more than once"));
+    }
+
+    fn with_standby(mut stage: Value, seeds: &[u8]) -> Value {
+        let ids: Vec<String> = seeds.iter().map(|&seed| worker_id(seed)).collect();
+        stage["remote"]["standby"] = json!(ids);
+        stage
+    }
+
+    #[test]
+    fn standby_workers_follow_the_primary() {
+        let stage = with_standby(remote(0, 2, 1), &[2, 3]);
+        let manifest = validate(manifest_json(vec![stage, local(2, 4)])).unwrap();
+        let expected: Vec<String> = [1, 2, 3].map(worker_id).into();
+        let ids = |workers: Vec<EndpointId>| -> Vec<String> {
+            workers.iter().map(EndpointId::to_string).collect()
+        };
+        assert_eq!(ids(manifest.stages[0].remote_candidates()), expected);
+        assert_eq!(ids(manifest.remote_workers()), expected);
+        assert_eq!(
+            manifest.stages[0].remote_worker().map(|id| id.to_string()),
+            Some(worker_id(1))
+        );
+        assert!(manifest.stages[1].remote_candidates().is_empty());
+        let plain = validate(manifest_json(vec![remote(0, 2, 1), local(2, 4)])).unwrap();
+        assert_eq!(plain.stages[0].remote_candidates().len(), 1);
+    }
+
+    #[test]
+    fn standby_workers_must_be_distinct_everywhere() {
+        let twice = with_standby(remote(0, 2, 1), &[2, 2]);
+        assert!(error_of(manifest_json(vec![twice, local(2, 4)])).contains("more than once"));
+        let primary_again = with_standby(remote(0, 2, 1), &[1]);
+        let error = error_of(manifest_json(vec![primary_again, local(2, 4)]));
+        assert!(error.contains("more than once"), "{error}");
+        // A standby reused by another stage is refused before the v1 topology rules.
+        let first = with_standby(remote(0, 1, 1), &[3]);
+        let second = remote(1, 2, 3);
+        let error = error_of(manifest_json(vec![first, second, local(2, 4)]));
+        assert!(error.contains("more than once"), "{error}");
+    }
+
+    #[test]
+    fn standby_entries_must_be_endpoint_ids_and_unknown_remote_fields_are_refused() {
+        let mut bad_id = remote(0, 2, 1);
+        bad_id["remote"]["standby"] = json!(["not-an-id"]);
+        assert!(parse(manifest_json(vec![bad_id, local(2, 4)])).is_err());
+        let mut not_list = remote(0, 2, 1);
+        not_list["remote"]["standby"] = json!(worker_id(2));
+        assert!(parse(manifest_json(vec![not_list, local(2, 4)])).is_err());
+        let mut typo = remote(0, 2, 1);
+        typo["remote"]["standbys"] = json!([worker_id(2)]);
+        assert!(parse(manifest_json(vec![typo, local(2, 4)])).is_err());
     }
 
     #[test]
@@ -830,6 +921,13 @@ mod tests {
         assert!(error_of(gap).contains("begin at layer 1"));
         let short = ring_json(vec![local(0, 1), remote(1, 3, 1)]);
         assert!(error_of(short).contains("4 layers"));
+    }
+
+    #[test]
+    fn ring_refuses_standby_workers() {
+        let stage = with_standby(remote(1, 4, 1), &[2]);
+        let error = error_of(ring_json(vec![local(0, 1), stage]));
+        assert!(error.contains("does not support standby"), "{error}");
     }
 
     #[test]

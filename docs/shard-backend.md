@@ -24,6 +24,62 @@ forwards to it just as it forwards to `llama-server`.
 3. Token IDs go to the prefix, its hidden states come back to the leader, the local final stage
    samples the next token greedily, and the token is fed back to the prefix. Pieces stream back
    to the job API as OpenAI-style SSE.
+4. If a stage fails in a way a fresh attempt might fix, the front end resumes the generation on
+   new stage links (see [Retries and standby workers](#retries-and-standby-workers)).
+
+## Retries and standby workers
+
+A runner holds one sequence whose cache only grows and cannot be reset, and it insists on
+strictly sequential steps and positions, so a broken generation cannot be repaired in place.
+Instead the front end keeps the generation's progress outside the stage links (the prompt
+tokens, every token generated so far, the text already sent, including a UTF-8 character
+that is only partly received) and resumes it on fresh links:
+
+1. It opens new links: local stages get new runner processes, and a remote stage dials its
+   next usable worker (below).
+2. The new links are checked exactly as on the first attempt. The new final stage must
+   tokenize the prompt exactly as the first one did; a difference is fatal.
+3. The prompt plus every generated token is prefilled again, in batches of at most 128,
+   from step and position 0, and decoding continues from the final reply. No text is sent
+   twice, so a stream simply carries on.
+
+Limits count totals over every attempt: `max_tokens` is the total number of completion tokens,
+and the context counts every position. A resume that no longer fits finishes with
+`finish_reason: "length"` rather than failing. A run without failures behaves exactly as
+before.
+
+Errors fall into two classes:
+
+| Class | Errors | What happens |
+| --- | --- | --- |
+| Retryable | Stage I/O errors, a stream or connection that closed, a step timeout (120 s), a runner that exited, a failed dial, a metadata timeout. | Retried after 250 ms, then 500 ms: at most 2 retries (3 attempts), and no retry starts once 15 minutes have passed since the job began. Each retry is logged as a warning with the attempt number, stage, worker and error. |
+| Fatal | A prompt longer than the context (HTTP 400), metadata that does not match the manifest (layer range, model identity, hidden size, final-ness), a prompt tokenized differently on a retry, a sampled token outside the vocabulary, a wrong number of hidden values, any other protocol violation. | Not retried. |
+
+When retries run out, or on a fatal error, the job fails as before: a JSON 5xx (or 400) if
+nothing was sent yet, or an SSE `error` event with no `[DONE]` mid-stream, so the job API
+fails the job without committing history. A client that disconnects still drops its
+generation at once, with no retry.
+
+A remote stage may list standby workers:
+
+```json
+{"begin": 0, "end": 32, "remote": {"worker": "<primary node id>", "standby": ["<standby node id>"]}}
+```
+
+Each attempt tries the stage's workers in order, primary first, skipping any worker that has
+already failed during this job. A worker whose dial or metadata read fails is skipped at once
+and the next one is tried within the same attempt; a worker that fails mid-generation is not
+dialled again for that job. Once every worker of a stage has failed, the job fails. A remote
+stage with no standby therefore gets no retry when its worker fails; only failures of local
+stages (or of a stage whose standby remains) are retried.
+
+Limits:
+
+- Each retry pays the cost of re-prefilling the prompt and everything generated so far, plus
+  the local runner's model load.
+- A standby must already run `shard-serve` with the identical stage artifact (same range, same
+  model identity) and allowlist the leader. Nothing is copied or loaded on demand.
+- Replanning a stage onto surviving peers is M-28; ring mode (M-27) is not covered.
 
 The frontend buffers at most 16 text events for a slow HTTP reader; generation applies
 backpressure instead of accumulating an unbounded queue. A disconnected client signals
@@ -110,6 +166,7 @@ so it exists only on the llama backend.
 | `chat_template` | Required: `"chatml"` or a pinned Jinja template object; the template is never guessed. See [Chat templates](#chat-templates). |
 | `stages` | Layer ranges in order, half-open, covering `0..layers` with no gaps. Each has `begin`, `end` and exactly one of `remote` or `local`. |
 | `remote.worker` | Node ID of the `shard-serve` worker for this range. The leader dials it by ID: through Iroh's n0 discovery in production, or in-memory address lookup in tests. |
+| `remote.standby` | Optional list of node IDs of workers serving the identical stage, tried in order when the primary fails (see [Retries and standby workers](#retries-and-standby-workers)). No node ID may appear twice anywhere in the manifest, as primary or standby. |
 | `local.model` | Model or exported shard file the local runner loads. |
 | `local.gpu_layers` | Layers offloaded to the GPU (default 0). |
 | `local.budget_bytes` | Runtime buffer budget passed to the runner; must be positive. |
@@ -185,7 +242,8 @@ template embedded in that model's own GGUF.
 - Chat templates: `chatml` or a pinned Jinja template (see [Chat templates](#chat-templates)).
   `tools` is always `none`; tool calls are not supported.
 - One sequence per runner process and no reset, so every job starts fresh runner processes
-  (and a fresh Iroh connection to the worker). Model load time is paid on every job.
+  (and a fresh Iroh connection to the worker). Model load time is paid on every job, and again
+  on every retry.
 - One generation runs at a time, matching the job queue.
 
 ## Experimental: ring execution (shard-ring/1)
@@ -326,8 +384,12 @@ terminal that never opens its result channel, which fails within the bounded wai
 `tests/shard_backend.rs` runs the job API end to end on the shard backend: a real
 `shard-serve` worker drives the `fake_shard_runner` example as the prefix, and the leader runs
 the local final stage. It covers buffered and streamed prompts, `GET /jobs`, fresh runners per
-job, a worker that does not allowlist the leader, and an invalid manifest. Build the helpers
-first:
+job, a worker that does not allowlist the leader, and an invalid manifest.
+`tests/shard_frontend.rs` covers retries and standbys against the front end directly: a stage
+that fails once (`FAKE_SHARD_FAIL_AT_STEP` with `FAKE_SHARD_FAIL_ONCE_FILE`) is resumed with
+the same text and token count as an uninterrupted run, an unreachable or failing primary hands
+over to its standby, exhausted retries end the job, and fatal errors are not retried. Build the
+helpers first:
 
 ```sh
 cargo build --examples
