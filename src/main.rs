@@ -120,6 +120,23 @@ enum Command {
         /// Versioned JSON with fresh range, link and memory observations.
         profile: PathBuf,
     },
+    /// Prepare an EXPERIMENTAL ring manifest and worker arguments from measured ranges.
+    /// Does not launch, reserve capacity, or qualify diagnostic measurements.
+    PrepareRing {
+        /// Current measured profile; timestamps are checked against current wall time.
+        profile: PathBuf,
+        /// Trusted device identities, native builds and exact range artifacts.
+        registry: PathBuf,
+        /// New output directory; existing paths are never overwritten.
+        #[arg(long)]
+        output_dir: PathBuf,
+    },
+    /// Verify a prepared ring bundle against original inputs and current expiration.
+    ValidateRing {
+        bundle: PathBuf,
+        profile: PathBuf,
+        registry: PathBuf,
+    },
     /// Recheck a saved measured plan against refreshed observations; no runtime verification.
     ValidateMeasured {
         /// JSON produced by `measured-plan`.
@@ -489,6 +506,41 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }
+        Command::PrepareRing {
+            profile,
+            registry,
+            output_dir,
+        } => {
+            let request = read_ring_json(&profile)?;
+            let registry = read_ring_json(&registry)?;
+            let bundle =
+                llm_cluster::ring_deployment::prepare(&request, &registry, current_unix_ms()?)?;
+            llm_cluster::ring_deployment::write_bundle(&bundle, &output_dir)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "preparation_id": bundle.preparation_id,
+                    "bundle": output_dir.join("bundle.json"),
+                    "expires_at_unix_ms": bundle.expires_at_unix_ms,
+                    "activation_ready": false,
+                })
+            );
+            Ok(())
+        }
+        Command::ValidateRing {
+            bundle,
+            profile,
+            registry,
+        } => {
+            llm_cluster::ring_deployment::validate(
+                &read_ring_json(&bundle)?,
+                &read_ring_json(&profile)?,
+                &read_ring_json(&registry)?,
+                current_unix_ms()?,
+            )?;
+            println!("{{\"configuration_valid\":true,\"activation_ready\":false}}");
+            Ok(())
+        }
         Command::MeasuredPlan { profile } => {
             let request: llm_cluster::measured_placement::MeasuredRequest =
                 serde_json::from_str(&std::fs::read_to_string(profile)?)?;
@@ -712,6 +764,23 @@ async fn shard_ring_worker(key: &Path, config: RingWorkerConfig) -> anyhow::Resu
     run_until_ctrl_c(&endpoint, serve).await
 }
 
+fn current_unix_ms() -> anyhow::Result<u64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_millis()
+        .try_into()?)
+}
+
+fn read_ring_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+    use std::io::Read;
+    const MAX_BYTES: u64 = 8 * 1024 * 1024;
+    let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(bytes.len() as u64 <= MAX_BYTES, "ring input exceeds 8 MiB");
+    serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
+}
+
 /// A half-open layer range `[begin, end)` given as `BEGIN:END`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LayerRange {
@@ -858,6 +927,68 @@ fn parse_duration(text: &str) -> Result<Duration, String> {
 
 #[cfg(test)]
 mod tests {
+    mod ring_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/common/ring_fixture.rs"
+        ));
+    }
+
+    #[test]
+    fn generated_ring_arguments_parse_as_actual_runtime_commands() {
+        use super::*;
+        let (request, registry) = ring_fixture::inputs(1000);
+        let bundle = llm_cluster::ring_deployment::prepare(&request, &registry, 1100).unwrap();
+        let cli = Cli::try_parse_from(
+            std::iter::once("llm-cluster".to_owned()).chain(bundle.leader_argv.clone()),
+        )
+        .unwrap();
+        assert_eq!(cli.key.to_str(), Some(bundle.leader.key_path.as_str()));
+        let Command::Leader(args) = cli.command else {
+            panic!("expected leader");
+        };
+        let config = args.into_config(cli.key, cli.cluster).unwrap();
+        assert!(matches!(config.backend, BackendConfig::Shard(_)));
+        assert_eq!(config.api_addr, registry.leader.api);
+        assert_eq!(config.upstream_port, registry.leader.upstream_port);
+        for worker in &bundle.workers {
+            let cli = Cli::try_parse_from(
+                std::iter::once("llm-cluster".to_owned()).chain(worker.argv.clone()),
+            )
+            .unwrap();
+            assert_eq!(cli.key.to_str(), Some(worker.stage.key_path.as_str()));
+            let Command::ShardRingWorker {
+                runner,
+                model,
+                range,
+                context,
+                gpu_layers,
+                budget_bytes,
+                expected_sha256,
+                source_sha256,
+                upstream,
+                origin,
+                next,
+            } = cli.command
+            else {
+                panic!("expected ring worker");
+            };
+            let expected = worker.config().unwrap();
+            assert_eq!(runner, expected.runner);
+            assert_eq!(model, expected.model);
+            assert_eq!((range.begin, range.end), (expected.begin, expected.end));
+            assert_eq!(
+                (context, gpu_layers, budget_bytes),
+                (expected.context, expected.gpu_layers, expected.budget_bytes)
+            );
+            assert_eq!(expected_sha256, expected.expected_sha256);
+            assert_eq!(source_sha256, expected.source_sha256);
+            assert_eq!(
+                (upstream, origin, next),
+                (expected.upstream, expected.origin, expected.next)
+            );
+        }
+    }
     use clap::CommandFactory;
     use llm_cluster::evidence;
 

@@ -5,6 +5,11 @@ observations and prints an **advisory** sequential decode placement. It does
 not launch a worker, write a shard manifest, reserve memory, or verify a run.
 The existing `plan` command and llama RPC launch path remain separate.
 
+`prepare-ring PROFILE.json REGISTRY.json --output-dir NEW_DIRECTORY` adds a
+ring-constrained search and generates validated leader/worker configurations.
+See [measured ring deployment](measured-ring-deployment.md). It preserves the
+advisory/evidence boundary and does not reserve or start devices.
+
 Run the synthetic fixture:
 
 ```sh
@@ -72,9 +77,10 @@ against refreshed inputs and rejects changed or expired profiles.
 
 ## Runtime acceptance still required
 
-The v1 shard backend currently accepts one remote prefix followed by a local
-final stage. M-27 must supply the production ring manifest and validation for
-arbitrary stage order and remote finals before this plan can drive that backend.
+Pipeline mode accepts one remote prefix followed by a local final stage. The
+experimental M-27 ring now accepts a leader-local prefix followed by remote
+stages ending at the final layer. `plan_ring` searches under that topology;
+`plan` retains its unconstrained behavior. Neither activates a deployment.
 The published Qwen3.8 ring summaries have fixed routes and scoped buffer and
 per-stage compute observations. They do not include fresh per-device usable
 capacity, total contribution peaks, or matching directed transfer costs for
@@ -118,6 +124,6 @@ prefill/decode costs and the objective used. It must keep whole-range costs
 intact and keep current availability and links separate from reusable compute
 evidence. M-27 adds a backend constraint: stage 0 is the leader-local range
 starting at layer 0, followed by one or more contiguous remote ring stages.
-The current v1 search does not enforce that constraint, so its output must not
-be translated directly into an M-27 manifest. A versioned planner/manifest
-adapter must reject plans that violate stage ownership and readiness rules.
+The original `plan` search does not enforce that constraint. The additive
+`plan_ring` search and `prepare-ring` adapter enforce stage ownership, but do
+not establish the remaining qualification, reservation or readiness evidence.

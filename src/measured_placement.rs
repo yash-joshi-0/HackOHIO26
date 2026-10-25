@@ -165,6 +165,25 @@ fn link<'a>(
 /// Exact subset search over measured contiguous ranges and directed links.
 /// Candidate order is independent of input order; each peer can own one range.
 pub fn plan(request: &MeasuredRequest) -> Result<MeasuredPlacement, MeasuredError> {
+    plan_with_topology(request, false)
+}
+
+/// M-27 ring placement: layer zero stays on the origin, followed by at least one
+/// remote stage. Search with the constraint instead of rejecting the unconstrained
+/// winner, which could hide a feasible ring alternative.
+pub fn plan_ring(request: &MeasuredRequest) -> Result<MeasuredPlacement, MeasuredError> {
+    if request.workload.batch_tokens != 1 {
+        return Err(invalid(
+            "ring planning requires single-token decode observations",
+        ));
+    }
+    plan_with_topology(request, true)
+}
+
+fn plan_with_topology(
+    request: &MeasuredRequest,
+    ring: bool,
+) -> Result<MeasuredPlacement, MeasuredError> {
     if request.schema_version != 1
         || !valid_sha256(&request.workload.model_sha256)
         || request.workload.runtime_id.is_empty()
@@ -264,6 +283,9 @@ pub fn plan(request: &MeasuredRequest) -> Result<MeasuredPlacement, MeasuredErro
     // (used-peer bitmask, final peer, completed layer prefix).
     let mut states: HashMap<(usize, usize, usize), Candidate> = HashMap::new();
     for (index, peer) in active.iter().enumerate() {
+        if ring && peer.id != request.origin_peer_id {
+            continue;
+        }
         for (&(begin, end), (range, charged)) in &ranges[index] {
             if begin != 0 {
                 continue;
@@ -345,7 +367,12 @@ pub fn plan(request: &MeasuredRequest) -> Result<MeasuredPlacement, MeasuredErro
     }
     let mut best: Option<Candidate> = None;
     for ((mask, last, end), candidate) in states {
-        if end != request.workload.layers || (mask.count_ones() as usize) < request.min_peers {
+        let min_peers = if ring {
+            request.min_peers.max(2)
+        } else {
+            request.min_peers
+        };
+        if end != request.workload.layers || (mask.count_ones() as usize) < min_peers {
             continue;
         }
         let peer = active[last];
@@ -406,6 +433,20 @@ pub fn validate_output(
         Ok(())
     } else {
         Err(invalid("saved measured plan differs from current profiles"))
+    }
+}
+
+/// Recompute the saved output under the actual ring backend's topology.
+pub fn validate_ring_output(
+    request: &MeasuredRequest,
+    output: &MeasuredPlacement,
+) -> Result<(), MeasuredError> {
+    if &plan_ring(request)? == output {
+        Ok(())
+    } else {
+        Err(invalid(
+            "saved ring plan differs from current profiles or topology",
+        ))
     }
 }
 

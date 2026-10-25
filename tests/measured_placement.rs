@@ -105,6 +105,40 @@ fn chooses_peer_order_and_exact_ranges_with_ingress_cost() {
 }
 
 #[test]
+fn ring_search_finds_supported_alternative_to_cheaper_remote_first_plan() {
+    let input = request();
+    assert_eq!(plan(&input).unwrap().assignments[0].peer_id, "b");
+    let ring = plan_ring(&input).unwrap();
+    assert_eq!(ring.assignments[0].peer_id, "a");
+    assert_eq!(ring.assignments[0].layers, 0..2);
+    assert_eq!(ring.assignments[1].peer_id, "b");
+    assert_eq!(ring.predicted_decode_us, 80 + 5 + 80 + 3);
+    assert_eq!(ring.link_profile_ids, ["a-b-20480", "b-a-4"]);
+    validate_ring_output(&input, &ring).unwrap();
+    assert!(validate_ring_output(&input, &plan(&input).unwrap()).is_err());
+}
+
+#[test]
+fn ring_requires_origin_remote_and_single_token_decode() {
+    let mut input = request();
+    input.min_peers = 1;
+    input.peers[0].ranges.push(range(0, 4, 1, "a-whole"));
+    assert_eq!(plan(&input).unwrap().assignments.len(), 1);
+    assert_eq!(plan_ring(&input).unwrap().assignments.len(), 2);
+    input.peers[1].healthy = false;
+    assert_eq!(plan_ring(&input), Err(MeasuredError::NoFeasiblePlacement));
+    input.peers[1].healthy = true;
+    input.peers[0].authorized = false;
+    assert_eq!(plan_ring(&input), Err(MeasuredError::NoFeasiblePlacement));
+    input.peers[0].authorized = true;
+    input.workload.batch_tokens = 2;
+    assert!(matches!(
+        plan_ring(&input),
+        Err(MeasuredError::InvalidInput(_))
+    ));
+}
+
+#[test]
 fn requires_fresh_matching_range_and_feedback_measurements() {
     let mut input = request();
     input.peers[1].ranges[0].measured_at_unix_ms = 1;
