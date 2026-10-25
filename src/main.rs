@@ -272,8 +272,8 @@ enum Command {
         /// at least one is required.
         #[arg(long = "allow-peer")]
         allow_peers: Vec<String>,
-        /// Time between heartbeats to the leader, e.g. `2s` or `500ms`.
-        #[arg(long, default_value = DEFAULT_HEARTBEAT_INTERVAL_ARG, value_parser = parse_duration)]
+        /// Positive time between heartbeats to the leader, e.g. `2s` or `500ms`.
+        #[arg(long, default_value = DEFAULT_HEARTBEAT_INTERVAL_ARG, value_parser = parse_positive_duration)]
         heartbeat_interval: Duration,
         /// Drop the control link and redial after this long without a heartbeat from the
         /// leader, e.g. `7s`. Must exceed the leader's --heartbeat-interval. Applies only once
@@ -988,6 +988,15 @@ fn parse_duration(text: &str) -> Result<Duration, String> {
     }
 }
 
+fn parse_positive_duration(text: &str) -> Result<Duration, String> {
+    let duration = parse_duration(text)?;
+    if duration.is_zero() {
+        Err("duration must be greater than zero".to_owned())
+    } else {
+        Ok(duration)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     mod ring_fixture {
@@ -1064,6 +1073,27 @@ mod tests {
         assert_eq!(parse_duration("2s"), Ok(Duration::from_secs(2)));
         assert_eq!(parse_duration("7"), Ok(Duration::from_secs(7)));
         assert_eq!(parse_duration("2m"), Ok(Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn worker_heartbeat_interval_must_be_positive() {
+        assert_eq!(
+            parse_positive_duration("500ms"),
+            Ok(Duration::from_millis(500))
+        );
+        assert!(parse_positive_duration("0s").is_err());
+        assert!(parse_positive_duration("0ms").is_err());
+        assert!(
+            Cli::try_parse_from([
+                "meshthing",
+                "worker",
+                "--rpc-server",
+                "rpc",
+                "--heartbeat-interval",
+                "0s",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

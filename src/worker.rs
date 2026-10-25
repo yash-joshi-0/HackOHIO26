@@ -126,6 +126,7 @@ async fn serve(
     leader: Option<EndpointAddr>,
     config: &WorkerConfig,
 ) -> anyhow::Result<()> {
+    validate_timing(config)?;
     let leader_id = leader.as_ref().map(|addr| addr.id);
     let allowed = bridge_allowlist(config, leader_id)?;
     let rpc_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, config.rpc_port));
@@ -146,6 +147,20 @@ async fn serve(
         warn!(error = %format!("{error:#}"), "failed to stop {RPC_SERVER_NAME} cleanly");
     }
     outcome
+}
+
+fn validate_timing(config: &WorkerConfig) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !config.heartbeat_interval.is_zero(),
+        "worker heartbeat interval must be greater than zero"
+    );
+    anyhow::ensure!(
+        config
+            .leader_heartbeat_timeout
+            .is_none_or(|timeout| !timeout.is_zero()),
+        "leader heartbeat timeout must be greater than zero when enabled"
+    );
+    Ok(())
 }
 
 /// Peers allowed to use the RPC bridge: the configured extras plus the leader this worker serves.
@@ -382,6 +397,30 @@ mod tests {
     fn bridge_allowlist_fails_closed_without_leader_or_peers() {
         let error = bridge_allowlist(&config(), None).expect_err("no approved peers");
         assert!(format!("{error:#}").contains("--allow-peer"), "{error:#}");
+    }
+
+    #[test]
+    fn worker_timing_rejects_zero_intervals_without_panicking() {
+        let mut config = config();
+        config.heartbeat_interval = Duration::ZERO;
+        assert!(
+            validate_timing(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("greater than zero")
+        );
+
+        config.heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL;
+        config.leader_heartbeat_timeout = Some(Duration::ZERO);
+        assert!(
+            validate_timing(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("greater than zero")
+        );
+
+        config.leader_heartbeat_timeout = None;
+        assert!(validate_timing(&config).is_ok());
     }
 
     #[test]

@@ -440,6 +440,7 @@ pub async fn write_heartbeats(
     interval: Duration,
     mut next_heartbeat: impl FnMut() -> Heartbeat,
 ) -> anyhow::Result<Infallible> {
+    ensure_heartbeat_interval(interval)?;
     let mut stream = connection
         .open_uni()
         .await
@@ -452,6 +453,14 @@ pub async fn write_heartbeats(
             .await
             .context("failed to send heartbeat")?;
     }
+}
+
+fn ensure_heartbeat_interval(interval: Duration) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !interval.is_zero(),
+        "heartbeat interval must be greater than zero"
+    );
+    Ok(())
 }
 
 /// Dialer side of acceptor heartbeats: reads every unidirectional stream `session`'s peer opens,
@@ -854,6 +863,13 @@ fn encode_hex(bytes: &[u8; SECRET_KEY_LEN]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_heartbeat_interval_returns_error_instead_of_panicking() {
+        let error = ensure_heartbeat_interval(Duration::ZERO).unwrap_err();
+        assert!(error.to_string().contains("greater than zero"));
+        assert!(ensure_heartbeat_interval(Duration::from_millis(1)).is_ok());
+    }
 
     #[test]
     fn superseded_connection_cannot_update_reconnected_peers_heartbeat() {
