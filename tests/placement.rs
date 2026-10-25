@@ -161,6 +161,23 @@ fn detects_bad_profiles_and_arithmetic_overflow() {
 }
 
 #[test]
+fn rejects_layer_count_above_exact_search_bound() {
+    let mut m = model();
+    m.layers.resize(
+        1025,
+        LayerMemory {
+            weight_bytes: 100,
+            kv_bytes_per_token: 2,
+        },
+    );
+
+    assert!(matches!(
+        plan(&m, &[], &[], 1),
+        Err(PlanError::InvalidInput(_))
+    ));
+}
+
+#[test]
 fn matches_exhaustive_two_peer_boundary_search() {
     for budget_a in [170, 290, 410, 530] {
         for budget_b in [170, 290, 410, 530] {
