@@ -31,13 +31,13 @@ struct RootView: View {
                     }
                 }
             }
-        }.tint(MeshPalette.accent)
+        }.tint(MeshPalette.brandAccent)
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 36) {
             HStack(spacing: 9) {
                 Image("BrandCake").resizable().interpolation(.none).scaledToFit().frame(width: 38, height: 38).accessibilityHidden(true)
-                Text("layercake").font(.custom("Georgia-Bold", size: 20))
+                Text("layercake").font(.system(size: 20, weight: .bold, design: .rounded))
             }.padding(.top, 24).accessibilityElement(children: .combine)
             VStack(alignment: .leading, spacing: 6) {
                 Eyebrow(text: "Workspace").padding(.leading, 12).padding(.bottom, 9)
@@ -136,7 +136,7 @@ struct MeshView: View {
     private var invitationCard: some View {
         Surface {
             VStack(alignment: .leading, spacing: 16) {
-                Image(systemName: "person.badge.plus").font(.title2).foregroundStyle(MeshPalette.accent)
+                Image(systemName: "person.badge.plus").font(.title2).foregroundStyle(MeshPalette.brandAccent)
                 Text("Make room for more.").font(MeshType.display(23))
                 Text("One invitation. A shared mesh.\nBring another device into your mesh.").font(.subheadline).foregroundStyle(MeshPalette.muted).lineSpacing(3)
                 Button { pairingMode = "create"; pairing = true } label: { Label("Invite a device", systemImage: "plus") }.buttonStyle(MeshButtonStyle())
@@ -146,7 +146,7 @@ struct MeshView: View {
     private var modelCard: some View {
         Surface {
             VStack(alignment: .leading, spacing: 16) {
-                Image(systemName: "square.stack.3d.up").font(.title2).foregroundStyle(MeshPalette.accent)
+                Image(systemName: "square.stack.3d.up").font(.title2).foregroundStyle(MeshPalette.brandAccent)
                 Text("One shared model.").font(MeshType.display(23))
                 Text(store.snapshot?.model ?? "Membership is ready. Model execution is still being connected.")
                     .font(.subheadline).foregroundStyle(MeshPalette.muted).lineSpacing(3)
@@ -171,7 +171,7 @@ struct MeshView: View {
             Text(number).font(MeshType.label).foregroundStyle(MeshPalette.muted).padding(.top, 4)
             VStack(alignment: .leading, spacing: 6) { Text(title).font(.subheadline.weight(.semibold)); Text(detail).font(.subheadline).foregroundStyle(MeshPalette.muted) }
             Spacer(minLength: 0)
-            Image(systemName: icon).font(.title3).foregroundStyle(MeshPalette.accent).padding(.top, 3).accessibilityHidden(true)
+            Image(systemName: icon).font(.title3).foregroundStyle(MeshPalette.brandAccent).padding(.top, 3).accessibilityHidden(true)
         }
     }
 }

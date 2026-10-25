@@ -44,7 +44,9 @@ import kotlinx.coroutines.CancellationException
 import java.text.DateFormat
 import java.util.Date
 
-private val Moss: Color @Composable get() = MaterialTheme.colorScheme.primary
+/** Status-label/tint accent. Matches the web "Brand accent" token; distinct from colorScheme.primary, which drives button fills. */
+private val BrandAccent: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFFEDB7A7) else Color(0xFF925648)
+private val Moss: Color @Composable get() = BrandAccent
 private val Sage: Color @Composable get() = MaterialTheme.colorScheme.secondaryContainer
 private val Canvas: Color @Composable get() = MaterialTheme.colorScheme.background
 
@@ -56,23 +58,23 @@ private val Canvas: Color @Composable get() = MaterialTheme.colorScheme.backgrou
         onBackground = Color(0xFFFFF3E7), onSurface = Color(0xFFFFF3E7),
         onSurfaceVariant = Color(0xFFCCB7A9), surfaceVariant = Color(0xFF3B2C28), outlineVariant = Color(0xFF574139)
     ) else lightColorScheme(
-        primary = Color(0xFF80534B), onPrimary = Color.White,
-        secondaryContainer = Color(0xFFF2EAE0), onSecondaryContainer = Color(0xFF654D40),
-        background = Color(0xFFFAF8F4), surface = Color(0xFFFFFDF9),
-        onBackground = Color(0xFF40382F), onSurface = Color(0xFF40382F),
-        onSurfaceVariant = Color(0xFF74685F), surfaceVariant = Color(0xFFF5EEE6), outlineVariant = Color(0xFFEAE0D5)
+        primary = Color(0xFF784B3E), onPrimary = Color.White,
+        secondaryContainer = Color(0xFFEAE1D9), onSecondaryContainer = Color(0xFF713D31),
+        background = Color(0xFFFAF9F7), surface = Color(0xFFFFFFFF),
+        onBackground = Color(0xFF292725), onSurface = Color(0xFF292725),
+        onSurfaceVariant = Color(0xFF706C66), surfaceVariant = Color(0xFFF5F3EF), outlineVariant = Color(0xFFE6E3DE)
     )
     val typography = Typography(
-        headlineLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 34.sp, lineHeight = 40.sp),
-        headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp, lineHeight = 34.sp),
-        titleLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 24.sp, lineHeight = 30.sp)
+        headlineLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 40.sp),
+        headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 34.sp),
+        titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 30.sp)
     )
     MaterialTheme(colorScheme = colors, typography = typography, content = content)
 }
 
 @Composable fun CakeSprinkles() {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 6.dp)) {
-        repeat(5) { index -> Box(Modifier.width(if (index == 2) 18.dp else 5.dp).height(4.dp).background(if (index % 2 == 0) Color(0xFFBD525B) else MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))) }
+        repeat(5) { index -> Box(Modifier.width(if (index == 2) 18.dp else 5.dp).height(4.dp).background(if (index % 2 == 0) Color(0xFFBD525B) else BrandAccent.copy(alpha = 0.45f))) }
     }
 }
 private fun bytes(value: Double?) = value?.let { "%.1f GiB".format(it / 1_073_741_824) } ?: "Not reported"
@@ -102,7 +104,7 @@ class MainActivity : ComponentActivity() {
     val titles = listOf("Mesh", "This device", "Model", "Settings")
     val icons = listOf(Icons.Default.Home, Icons.Default.Person, Icons.Default.Star, Icons.Default.Settings)
     Scaffold(
-        topBar = { TopAppBar(title = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { if (tab == 0) Image(painterResource(R.drawable.layercake), contentDescription = null, modifier = Modifier.size(38.dp)); Text(if (tab == 0) "layercake" else titles[tab], fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) } }) },
+        topBar = { TopAppBar(title = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { if (tab == 0) Image(painterResource(R.drawable.layercake), contentDescription = null, modifier = Modifier.size(38.dp)); Text(if (tab == 0) "layercake" else titles[tab], fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold) } }) },
         bottomBar = { NavigationBar(containerColor = Canvas) { titles.forEachIndexed { index, title -> NavigationBarItem(selected = tab == index, onClick = { tab = index }, icon = { Icon(icons[index], contentDescription = null) }, label = { Text(title) }) } } }
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().background(Canvas).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -116,16 +118,27 @@ class MainActivity : ComponentActivity() {
     }
     if (pairing) PairingDialog(store, startWithJoin) { pairing = false }
     selected?.let { device ->
-        AlertDialog(onDismissRequest = { selected = null }, title = { Text(device.name) }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(device.hardware)
-                Text("Layers ${device.range}")
-                Text("${if (!store.connected) "Unavailable" else if (store.snapshot?.active == true) "Current run" else "Last reported run"} · ${device.executions} executions")
-                Text("Native compute: ${device.computeMs?.let { "%.1f ms".format(it) } ?: "Not reported"}")
-                Text("Observed buffers: ${bytes(device.bufferBytes)}")
-                Text("Buffers do not describe total memory. Trust and model benchmark eligibility are not reported.", style = MaterialTheme.typography.bodySmall)
+        AlertDialog(onDismissRequest = { selected = null }, title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = BrandAccent)
+                Column { Text(device.name, fontWeight = FontWeight.SemiBold); Text(device.hardware, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                DetailRow("Layers", device.range)
+                DetailRow("Observation", "${if (!store.connected) "Unavailable" else if (store.snapshot?.active == true) "Current run" else "Last reported run"} · ${device.executions} executions")
+                DetailRow("Native compute", device.computeMs?.let { "%.1f ms".format(it) } ?: "Not reported")
+                DetailRow("Observed buffers", bytes(device.bufferBytes))
+                Text("Buffers do not describe total memory. Trust and model benchmark eligibility are not reported.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             }
         }, confirmButton = { TextButton(onClick = { selected = null }) { Text("Done") } })
+    }
+}
+
+@Composable private fun DetailRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 12.dp))
     }
 }
 

@@ -7,7 +7,7 @@ import SwiftUI
     var body: some Scene {
         WindowGroup {
             RootView().environmentObject(store).environmentObject(enrollment)
-                .tint(MeshPalette.accent)
+                .tint(MeshPalette.brandAccent)
                 .task(id: phase) {
                     guard phase == .active else { await enrollment.stop(); return }
                     await enrollment.start()

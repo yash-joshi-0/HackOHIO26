@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum MeshType {
-    static func display(_ size: CGFloat) -> Font { .custom("Georgia", size: size, relativeTo: .largeTitle) }
+    static func display(_ size: CGFloat) -> Font { .system(size: size, weight: .bold, design: .rounded) }
     static let label = Font.system(.caption2, design: .monospaced).weight(.medium)
 }
 
@@ -107,13 +107,13 @@ struct MeshIllustration: View {
                     }
                 }
                 var path = Path(); path.move(to: points[0]); path.addLine(to: points[1]); path.addLine(to: points[2]); path.closeSubpath()
-                context.stroke(path, with: .color(MeshPalette.accent.opacity(0.35)), style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+                context.stroke(path, with: .color(MeshPalette.brandAccent.opacity(0.35)), style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
             }
             Image("BrandCake").resizable().interpolation(.none).scaledToFit()
                 .frame(width: 84, height: 84).position(x: w * 0.5, y: h * 0.58)
             ForEach(0..<3) { index in
                 Image(systemName: ["desktopcomputer", "ipad", "iphone"][index])
-                    .font(.system(size: 25, weight: .light)).foregroundStyle(MeshPalette.accent)
+                    .font(.system(size: 25, weight: .light)).foregroundStyle(MeshPalette.brandAccent)
                     .frame(width: 64, height: 64).background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(MeshPalette.line, lineWidth: 1))
                     .position(points[index])
@@ -127,7 +127,7 @@ struct CakeSprinkles: View {
     var body: some View {
         HStack(spacing: 8) {
             ForEach(0..<5) { index in
-                Rectangle().fill(index.isMultiple(of: 2) ? MeshPalette.strawberry : MeshPalette.accent.opacity(0.45))
+                Rectangle().fill(index.isMultiple(of: 2) ? MeshPalette.strawberry : MeshPalette.brandAccent.opacity(0.45))
                     .frame(width: index == 2 ? 18 : 5, height: 4)
                     .offset(y: index == 1 ? 3 : 0)
             }

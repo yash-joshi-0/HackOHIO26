@@ -33,11 +33,7 @@ import java.util.Date
         }
         Text("Devices are enrolled. Model benchmarking and compute setup are still pending.", style = MaterialTheme.typography.bodySmall)
     }
-    state?.joiningName?.let { name ->
-        Text("Waiting to join $name", style = MaterialTheme.typography.titleMedium)
-        Text("Ask any trusted member to approve this device. Keep both apps open.")
-        TextButton(onClick = { scope.launch { enrollment.perform("cancel_join") } }, enabled = !enrollment.busy) { Text("Cancel request") }
-    }
+    WaitingToJoinCard(enrollment)
     state?.pending?.forEach { request ->
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -54,6 +50,21 @@ import java.util.Date
     if (!state?.notice.isNullOrEmpty()) Text(state!!.notice)
     if (enrollment.error.isNotEmpty()) Text(enrollment.error, color = MaterialTheme.colorScheme.error)
     if (enrollment.discoveryError.isNotEmpty()) Text(enrollment.discoveryError, color = MaterialTheme.colorScheme.error)
+}
+
+/** Shown both on the main mesh screen and, alone, inside the pairing sheet while a join request is outstanding. */
+@Composable fun WaitingToJoinCard(enrollment: EnrollmentController) {
+    val state = enrollment.state
+    val scope = rememberCoroutineScope()
+    state?.joiningName?.let { name ->
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Waiting to join $name", style = MaterialTheme.typography.titleMedium)
+                Text("Ask any trusted member to approve this device. Keep both apps open.")
+                TextButton(onClick = { scope.launch { enrollment.perform("cancel_join") } }, enabled = !enrollment.busy) { Text("Cancel request") }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,8 +123,11 @@ import java.util.Date
                 }
             }
             if (enrollment.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            MembershipSummary(enrollment)
-            Text("Pair across networks through Iroh. Keep both apps open until a trusted member approves. Membership is saved on this device.", style = MaterialTheme.typography.bodySmall)
+            WaitingToJoinCard(enrollment)
+            if (!state?.notice.isNullOrEmpty()) Text(state!!.notice)
+            if (enrollment.error.isNotEmpty()) Text(enrollment.error, color = MaterialTheme.colorScheme.error)
+            if (enrollment.discoveryError.isNotEmpty()) Text(enrollment.discoveryError, color = MaterialTheme.colorScheme.error)
+            Text("Pair across networks through Iroh. Keep both apps open until a trusted member approves. Your trusted devices and any pending requests stay visible on the Mesh tab behind this sheet.", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = close, modifier = Modifier.align(Alignment.End)) { Text("Done") }
         }
     }

@@ -81,9 +81,15 @@ Use direct descriptions of the data. Prefer “Devices,” “Execution route,�
 
 Use labeled controls, visible keyboard focus, a skip-to-content link, and text alongside status colors. Respect reduced-motion preferences. Loading, disconnected, missing telemetry, and no matching devices are distinct states with useful explanations. Retained observations must remain clearly labeled when refresh fails.
 
+## Platforms
+
+This color table is canonical for iOS and Android as well as web — light mode only; the mobile apps' existing dark-mode palettes are a mobile-only extension with no web equivalent and are not governed by this table. Typography stays per platform: web uses DM Sans Variable and Manrope Variable as specified above; iOS and Android use their platform's system sans font at a bold weight for display text — no serif anywhere in the brand, and no bundled custom font files on mobile. Layout and component shape (sidebar vs. bottom navigation/tabs, corner radii, dialog vs. sheet) stays platform-native; only the color tokens and the content inside overlays are shared.
+
+Overlays and sheets on every platform show one focused task at a time. Do not concatenate unrelated sections (for example invitation creation, the full trusted-members list, and pending-approval decisions) into a single scrolling overlay — if content is already shown on the screen behind the overlay, it does not need to repeat inside it.
+
 ## Validation and implementation
 
-The implementation lives in `apps/web/src/app.css` and `apps/web/src/routes/+page.svelte`. This document records the design intent; keep it aligned with future changes.
+The implementation lives in `apps/web/src/app.css` and `apps/web/src/routes/+page.svelte` (web), `apps/ios/Sources/Palette.swift` and `apps/ios/Sources/Design.swift` (iOS), and the `LayercakeTheme` in `apps/android/app/src/main/java/org/meshthing/mobile/MainActivity.kt` (Android). This document records the design intent; keep it aligned with future changes.
 
 Before shipping a UI change:
 

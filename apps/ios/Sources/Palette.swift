@@ -17,14 +17,17 @@ enum MeshPalette {
     }
 
     static let strawberry = adaptive(light: 0xBD525B, dark: 0xF49DA4)
-    static let canvas = adaptive(light: 0xFAF8F4, dark: 0x211B19)
-    static let surface = adaptive(light: 0xFFFDF9, dark: 0x2D2421)
-    static let hero = adaptive(light: 0xF2EAE0, dark: 0x3B2C28)
-    static let accent = adaptive(light: 0x80534B, dark: 0xEDB7A7)
-    static let onAccent = adaptive(light: 0xFFFDF9, dark: 0x35201C)
-    static let warning = adaptive(light: 0x8A4700, dark: 0xFFD08A)
-    static let ink = adaptive(light: 0x40382F, dark: 0xFFF3E7)
-    static let muted = adaptive(light: 0x74685F, dark: 0xCCB7A9)
-    static let line = adaptive(light: 0xEAE0D5, dark: 0x574139)
-    static let sidebar = adaptive(light: 0xFDFBF7, dark: 0x261E1B)
+    static let canvas = adaptive(light: 0xFAF9F7, dark: 0x211B19)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x2D2421)
+    static let hero = adaptive(light: 0xEAE1D9, dark: 0x3B2C28)
+    /// Primary action (button fill). Matches the web "Primary action" token.
+    static let accent = adaptive(light: 0x784B3E, dark: 0xEDB7A7)
+    /// Focus rings, tint, and status-label accents. Matches the web "Brand accent" token.
+    static let brandAccent = adaptive(light: 0x925648, dark: 0xEDB7A7)
+    static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x35201C)
+    static let warning = adaptive(light: 0x856528, dark: 0xFFD08A)
+    static let ink = adaptive(light: 0x292725, dark: 0xFFF3E7)
+    static let muted = adaptive(light: 0x706C66, dark: 0xCCB7A9)
+    static let line = adaptive(light: 0xE6E3DE, dark: 0x574139)
+    static let sidebar = adaptive(light: 0xF5F3EF, dark: 0x261E1B)
 }

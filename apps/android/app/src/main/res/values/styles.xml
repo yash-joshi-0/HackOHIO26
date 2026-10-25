@@ -2,8 +2,8 @@
     <style name="Theme.MeshThing" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowBackground">#FAF8F4</item>
-        <item name="android:colorAccent">#80534B</item>
+        <item name="android:windowBackground">#FAF9F7</item>
+        <item name="android:colorAccent">#784B3E</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

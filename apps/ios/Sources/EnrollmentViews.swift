@@ -3,7 +3,7 @@ import SwiftUI
 struct MembershipSummary: View {
     @EnvironmentObject private var enrollment: EnrollmentStore
     var body: some View {
-        if let joining = enrollment.state?.joining { waiting(joining) }
+        WaitingToJoinCard()
         ForEach(enrollment.state?.pending ?? []) { request in approval(request) }
         if enrollment.state?.mesh != nil { members }
         EnrollmentNotices()
@@ -36,7 +36,7 @@ struct MembershipSummary: View {
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: isSelf ? "ipad" : "network").font(.system(size: 21, weight: .light))
-                    .frame(width: 48, height: 48).foregroundStyle(MeshPalette.accent)
+                    .frame(width: 48, height: 48).foregroundStyle(MeshPalette.brandAccent)
                     .background(MeshPalette.hero, in: RoundedRectangle(cornerRadius: 15))
                 VStack(alignment: .leading, spacing: 5) {
                     Text(member.name).font(.subheadline.weight(.semibold)).foregroundStyle(MeshPalette.ink)
@@ -45,20 +45,9 @@ struct MembershipSummary: View {
             }
         }.tint(MeshPalette.muted)
     }
-    private func waiting(_ joining: EnrollmentState.Joining) -> some View {
-        Surface {
-            VStack(alignment: .leading, spacing: 20) {
-                Label("REQUEST SENT", systemImage: "hourglass").font(MeshType.label).foregroundStyle(MeshPalette.accent)
-                Text("A little trust goes\na long way.").font(MeshType.display(30))
-                Text("Waiting for a member of \(joining.name) to approve this device. Keep both apps open.").font(.subheadline).foregroundStyle(MeshPalette.muted)
-                Text("Expires in \(Date(timeIntervalSince1970: joining.expires), style: .relative)").font(.caption).foregroundStyle(MeshPalette.muted)
-                Button("Cancel request", role: .destructive) { Task { await enrollment.perform(["op": "cancel_join"]) } }.disabled(enrollment.busy)
-            }
-        }
-    }
     private func approval(_ request: EnrollmentState.Pending) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("KNOCK, KNOCK", systemImage: "person.badge.plus").font(MeshType.label).foregroundStyle(MeshPalette.accent)
+            Label("KNOCK, KNOCK", systemImage: "person.badge.plus").font(MeshType.label).foregroundStyle(MeshPalette.brandAccent)
             Text("\(request.name) wants to join.").font(MeshType.display(27))
             Text("Trust this device to join your mesh and approve other members.").font(.subheadline).foregroundStyle(MeshPalette.muted)
             Text("DEVICE \(request.applicant.prefix(12))").font(MeshType.label).foregroundStyle(MeshPalette.muted)
@@ -68,7 +57,7 @@ struct MembershipSummary: View {
             }.disabled(enrollment.busy)
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
             .background(MeshPalette.hero, in: RoundedRectangle(cornerRadius: 22))
-            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(MeshPalette.accent.opacity(0.2), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(MeshPalette.brandAccent.opacity(0.2), lineWidth: 1))
     }
     private func trustButton(_ request: EnrollmentState.Pending) -> some View {
         Button { decide(request, approve: true) } label: { Label("Trust device", systemImage: "checkmark") }.buttonStyle(MeshButtonStyle())
@@ -78,6 +67,24 @@ struct MembershipSummary: View {
     }
     private func decide(_ request: EnrollmentState.Pending, approve: Bool) {
         Task { await enrollment.perform(["op": "decide", "issuer": request.issuer, "request": request.id, "approve": approve]) }
+    }
+}
+
+/// Shown both on the main mesh screen and, alone, inside the pairing sheet while a join request is outstanding.
+private struct WaitingToJoinCard: View {
+    @EnvironmentObject private var enrollment: EnrollmentStore
+    var body: some View {
+        if let joining = enrollment.state?.joining {
+            Surface {
+                VStack(alignment: .leading, spacing: 20) {
+                    Label("REQUEST SENT", systemImage: "hourglass").font(MeshType.label).foregroundStyle(MeshPalette.brandAccent)
+                    Text("A little trust goes\na long way.").font(MeshType.display(30))
+                    Text("Waiting for a member of \(joining.name) to approve this device. Keep both apps open.").font(.subheadline).foregroundStyle(MeshPalette.muted)
+                    Text("Expires in \(Date(timeIntervalSince1970: joining.expires), style: .relative)").font(.caption).foregroundStyle(MeshPalette.muted)
+                    Button("Cancel request", role: .destructive) { Task { await enrollment.perform(["op": "cancel_join"]) } }.disabled(enrollment.busy)
+                }
+            }
+        }
     }
 }
 
@@ -109,11 +116,10 @@ struct PairingView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     if let mesh = enrollment.state?.mesh { invitation(mesh) }
                     else if enrollment.state?.joining == nil { setup }
-                    if enrollment.state?.joining != nil || enrollment.state?.pending.isEmpty == false {
-                        MembershipSummary()
-                    } else { EnrollmentNotices() }
+                    WaitingToJoinCard()
+                    EnrollmentNotices()
                     Divider().overlay(MeshPalette.line)
-                    StatusNote(symbol: "globe", text: "Pair across networks through Iroh. Keep both apps open until a trusted member approves.")
+                    StatusNote(symbol: "globe", text: "Pair across networks through Iroh. Keep both apps open until a trusted member approves. Your trusted devices and any pending requests stay visible on the mesh screen behind this sheet.")
                 }.padding(28).frame(maxWidth: 590, alignment: .leading).frame(maxWidth: .infinity)
             }.background(MeshPalette.canvas).foregroundStyle(MeshPalette.ink)
                 .navigationBarTitleDisplayMode(.inline)
@@ -121,7 +127,7 @@ struct PairingView: View {
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.font(.subheadline.weight(.semibold)) }
                 }
                 .overlay { if enrollment.busy { ProgressView().padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)) } }
-        }.presentationDetents([.large]).presentationDragIndicator(.visible).presentationCornerRadius(28)
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible).presentationCornerRadius(28)
             .task {
                 if enrollment.state?.mesh != nil && enrollment.state?.invite == nil && enrollment.state?.pending.isEmpty == true {
                     await enrollment.perform(["op": "invite"])
