@@ -84,6 +84,7 @@ pub fn inputs(now: u64) -> (MeasuredRequest, DeploymentRegistry) {
                 .ranges
                 .iter()
                 .map(|range| ArtifactBinding {
+                    role: None,
                     range_profile_id: range.profile_id.clone(),
                     begin: range.begin,
                     end: range.end,

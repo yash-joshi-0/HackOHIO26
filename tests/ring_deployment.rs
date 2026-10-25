@@ -56,6 +56,54 @@ fn measured_ranges_become_real_manifest_and_worker_configs() {
 }
 
 #[test]
+fn artifact_roles_bind_stage_requirements_without_claiming_tensor_verification() {
+    let (request, mut registry) = fixture::inputs(1000);
+    registry.devices[0].artifacts[0].role = Some(ArtifactRole::First);
+    registry.devices[1].artifacts[0].role = Some(ArtifactRole::Middle);
+    registry.devices[2].artifacts[0].role = Some(ArtifactRole::Final);
+    let bundle = prepare(&request, &registry, 1100).unwrap();
+    assert!(!bundle.activation_ready);
+    assert_eq!(bundle.leader.artifact.role, Some(ArtifactRole::First));
+    assert_eq!(
+        bundle.workers[1].stage.artifact.role,
+        Some(ArtifactRole::Final)
+    );
+    validate(&bundle, &request, &registry, 1200).unwrap();
+    for (device, wrong_role) in [
+        (0, ArtifactRole::Final),
+        (1, ArtifactRole::First),
+        (2, ArtifactRole::Middle),
+        (2, ArtifactRole::Full),
+    ] {
+        let mut wrong = registry.clone();
+        wrong.devices[device].artifacts[0].role = Some(wrong_role);
+        let error = prepare(&request, &wrong, 1100).unwrap_err();
+        assert!(error.to_string().contains("artifact role"));
+    }
+}
+
+#[test]
+fn omitted_artifact_roles_preserve_legacy_json_and_bundle_hashes() {
+    let (request, registry) = fixture::inputs(1000);
+    let serialized = serde_json::to_value(&registry).unwrap();
+    assert!(
+        serialized["devices"][0]["artifacts"][0]
+            .get("role")
+            .is_none()
+    );
+    let round_trip = serde_json::from_value(serialized).unwrap();
+    let bundle = prepare(&request, &registry, 1100).unwrap();
+    assert_eq!(bundle, prepare(&request, &round_trip, 1100).unwrap());
+    let mut with_roles = registry.clone();
+    with_roles.devices[2].artifacts[0].role = Some(ArtifactRole::Final);
+    assert!(validate(&bundle, &request, &with_roles, 1200).is_err());
+    assert_ne!(
+        bundle.preparation_id,
+        prepare(&request, &with_roles, 1100).unwrap().preparation_id
+    );
+}
+
+#[test]
 fn unavailable_peer_replans_to_another_measured_range_without_hardcoded_layers() {
     let (mut request, registry) = fixture::inputs(1000);
     let first = prepare(&request, &registry, 1100).unwrap();

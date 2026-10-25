@@ -76,6 +76,15 @@ Windows drive/UNC paths are accepted when preparing on another OS. The key file
 must already identify the recorded endpoint. Do not copy private keys into the
 bundle. A registry entry supplies the key's path only.
 
+Artifact entries may declare `role` as `first`, `middle`, `final` or `full`.
+Preparation checks that the role matches the exact range and model layer count.
+For example, a `middle` export cannot be bound to the terminal stage just because
+its layer range ends at the last layer. Omitted roles preserve legacy registries
+and bundle hashes, but remain unknown. The declaration is an early compatibility
+check: staging must still verify the GGUF metadata and actual required tensors
+(first-stage embeddings, final output/output_norm or tied embeddings, and shared
+tensors). A matching role never changes `activation_ready` to true.
+
 The registry's model/runtime must equal the measured workload. Range and link
 profile IDs must be unambiguous. Selected endpoints must have distinct physical
 resource IDs, so multiple identities cannot multiply one device's capacity.

@@ -63,11 +63,34 @@ pub struct ArtifactBinding {
     pub range_profile_id: String,
     pub begin: usize,
     pub end: usize,
+    /// Catalog/export role assertion; destination tensor verification is still required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ArtifactRole>,
     pub model: String,
     pub artifact_sha256: String,
     pub gpu_layers: u32,
     /// Native GGML buffer limit, NOT total RAM/VRAM or the planner's pool peak.
     pub budget_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactRole {
+    First,
+    Middle,
+    Final,
+    Full,
+}
+
+impl ArtifactRole {
+    fn for_range(begin: usize, end: usize, layers: usize) -> Self {
+        match (begin == 0, end == layers) {
+            (true, true) => Self::Full,
+            (true, false) => Self::First,
+            (false, true) => Self::Final,
+            (false, false) => Self::Middle,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -502,6 +525,16 @@ fn validate_registry(
                 artifact.begin < artifact.end && artifact.end <= request.workload.layers,
                 "invalid artifact range"
             );
+            if let Some(role) = artifact.role {
+                ensure!(
+                    role == ArtifactRole::for_range(
+                        artifact.begin,
+                        artifact.end,
+                        request.workload.layers
+                    ),
+                    "artifact role does not match its range and stage position"
+                );
+            }
             absolute_path(&artifact.model, "artifact path")?;
             sha256(&artifact.artifact_sha256, "artifact hash")?;
             ensure!(
