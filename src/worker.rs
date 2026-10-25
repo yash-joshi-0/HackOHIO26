@@ -57,6 +57,10 @@ const RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 /// Longest pause between redial attempts.
 const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(10);
 
+/// A hello alone does not reset backoff; require several heartbeat periods of stability.
+const BACKOFF_RESET_AFTER_HEARTBEATS: u32 = 5;
+const BACKOFF_RESET_MIN_DURATION: Duration = Duration::from_secs(1);
+
 /// Everything `llm-cluster worker` needs to run.
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
@@ -239,8 +243,8 @@ impl ControlLink<'_> {
         let session = tokio::time::timeout(LEADER_DIAL_TIMEOUT, dial)
             .await
             .context("timed out dialling the leader")??;
-        self.backoff.reset();
         info!(leader = %session.hello().node_id, "control link to leader established");
+        let connected_at = tokio::time::Instant::now();
 
         let watch = network::watch_heartbeats(&session, &self.peers, self.leader_heartbeat_timeout);
         // Both run for the whole session: the send loop only ends on a failed write, and the
@@ -249,10 +253,13 @@ impl ControlLink<'_> {
         let send = network::write_heartbeats(session.connection(), self.interval, || {
             heartbeats.next_heartbeat()
         });
-        tokio::select! {
+        let outcome = tokio::select! {
             sent = send => sent,
             reason = watch => Err(link_lost(reason)),
-        }
+        };
+        self.backoff
+            .reset_after_session(connected_at.elapsed(), self.interval);
+        outcome
     }
 }
 
@@ -289,7 +296,7 @@ impl HeartbeatSequence {
 }
 
 /// Delay between redials of the leader: exponential per consecutive failure, restarting after a
-/// successful hello.
+/// control session remains up for several heartbeat periods.
 #[derive(Default)]
 struct ReconnectBackoff {
     consecutive_failures: u32,
@@ -311,6 +318,15 @@ impl ReconnectBackoff {
 
     fn reset(&mut self) {
         self.consecutive_failures = 0;
+    }
+
+    fn reset_after_session(&mut self, connected_for: Duration, interval: Duration) {
+        let stable_for = interval
+            .saturating_mul(BACKOFF_RESET_AFTER_HEARTBEATS)
+            .max(BACKOFF_RESET_MIN_DURATION);
+        if connected_for >= stable_for {
+            self.reset();
+        }
     }
 }
 
@@ -433,6 +449,19 @@ mod tests {
         assert_eq!(delays[6], RECONNECT_MAX_BACKOFF);
 
         backoff.reset();
+        assert_eq!(backoff.next_delay(), RECONNECT_INITIAL_BACKOFF);
+    }
+
+    #[test]
+    fn short_control_sessions_do_not_reset_reconnect_backoff() {
+        let mut backoff = ReconnectBackoff::default();
+        assert_eq!(backoff.next_delay(), RECONNECT_INITIAL_BACKOFF);
+        assert_eq!(backoff.next_delay(), RECONNECT_INITIAL_BACKOFF * 2);
+
+        backoff.reset_after_session(Duration::from_secs(9), Duration::from_secs(2));
+        assert_eq!(backoff.next_delay(), RECONNECT_INITIAL_BACKOFF * 4);
+
+        backoff.reset_after_session(Duration::from_secs(10), Duration::from_secs(2));
         assert_eq!(backoff.next_delay(), RECONNECT_INITIAL_BACKOFF);
     }
 }
