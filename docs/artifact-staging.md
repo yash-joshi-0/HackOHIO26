@@ -90,6 +90,8 @@ excluded. Do not relabel their sidecars to bypass provenance checks.
 These commands are standalone diagnostics. Applications should attach the seed
 and downloader to their existing Node in the same runtime process, as above;
 never open the same identity directory in two simultaneous processes.
+The CLI caps each seed spec, catalog, and manifest JSON file at 16 MiB; it
+enforces the limit during the read as well as before reading the file.
 
 For large models, use release builds (`cargo run --release`) so hashing is optimized.
 Create a seed spec using absolute local paths, for example:

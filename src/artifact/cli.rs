@@ -1,7 +1,13 @@
 use super::*;
 use anyhow::{Context, bail};
 use clap::{Args, Subcommand};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use tokio::io::AsyncReadExt;
+
+const MAX_ARTIFACT_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Args)]
 pub struct Options {
@@ -52,12 +58,27 @@ enum Command {
         retain: bool,
     },
 }
-async fn read_json<T: serde::de::DeserializeOwned>(path: &PathBuf) -> Result<T> {
-    ensure!(
-        tokio::fs::metadata(path).await?.len() <= 16 * 1024 * 1024,
-        "artifact configuration too large"
+async fn read_limited(reader: impl tokio::io::AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .await?;
+    anyhow::ensure!(
+        bytes.len() <= limit,
+        "artifact configuration exceeds the {limit}-byte limit"
     );
-    Ok(serde_json::from_slice(&tokio::fs::read(path).await?)?)
+    Ok(bytes)
+}
+
+async fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    let file = tokio::fs::File::open(path).await?;
+    anyhow::ensure!(
+        file.metadata().await?.len() <= MAX_ARTIFACT_CONFIG_BYTES as u64,
+        "artifact configuration exceeds the {MAX_ARTIFACT_CONFIG_BYTES}-byte limit"
+    );
+    let bytes = read_limited(file, MAX_ARTIFACT_CONFIG_BYTES).await?;
+    Ok(serde_json::from_slice(&bytes)?)
 }
 async fn write_catalog(path: &PathBuf, catalog: &Catalog) -> Result<()> {
     // create_new avoids replacing a catalog still in use by another process.
@@ -179,4 +200,15 @@ async fn run_command(command: Command, cancel: &CancellationToken) -> Result<()>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn artifact_config_reader_enforces_limit_while_reading() {
+        let error = read_limited(&b"12345"[..], 4).await.unwrap_err();
+        assert!(error.to_string().contains("4-byte limit"));
+    }
 }
