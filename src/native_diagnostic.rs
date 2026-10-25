@@ -141,6 +141,10 @@ pub fn import_native_candidate_diagnostic(
         samples,
         qualification_exclusions: vec![
             "diagnostic_is_not_qualified_evidence".into(),
+            // The CLI accepts independent files and the producer has no shared run
+            // identifier in each JSONL row. Hashes identify bytes; they do not prove
+            // that the caller selected samples from this report's run.
+            "report_sample_pairing_not_verified_caller_must_select_same_run_files".into(),
             "effective_backend_not_independently_attested".into(),
             "whole_physical_pool_load_and_inference_peaks_missing".into(),
             "sensor_backed_power_and_thermal_conditions_missing".into(),

@@ -127,7 +127,7 @@ enum Command {
         /// Native candidate diagnostic report.json (schema v1).
         #[arg(long)]
         report: PathBuf,
-        /// Matching samples.jsonl from the same profile run.
+        /// samples.jsonl supplied by the caller; same-run pairing is not verified.
         #[arg(long)]
         samples: PathBuf,
     },

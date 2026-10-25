@@ -68,6 +68,33 @@ fn passing_report_remains_diagnostic_and_preserves_every_source_record() {
 }
 
 #[test]
+fn producer_shaped_cleanup_failure_preserves_outcome_counters_and_ordered_samples() {
+    // Captured fixture follows profile_candidate.py's report and JSONL row shape,
+    // including fields normally added in its finally/cleanup path.
+    let report = include_bytes!("fixtures/native-diagnostic-cleanup-failed/report.json");
+    let samples = include_bytes!("fixtures/native-diagnostic-cleanup-failed/samples.jsonl");
+    let imported = import_native_candidate_diagnostic(report, samples).unwrap();
+
+    assert_eq!(imported.outcome, "cleanup_failed");
+    assert_eq!(imported.report["status"], "cleanup_failed");
+    assert_eq!(imported.report["outcome_before_cleanup"], "passed");
+    assert_eq!(imported.report["counters"]["wire_bytes"], 4096);
+    assert_eq!(imported.report["counters"]["log_bytes"], 512);
+    assert_eq!(
+        imported.report["summary"]["decode"]["service"]["p95_ms"],
+        5.0
+    );
+    assert_eq!(imported.samples.len(), 2);
+    assert_eq!(imported.samples[0]["phase"], "prefill");
+    assert_eq!(imported.samples[1]["phase"], "decode");
+    assert!(
+        imported.qualification_exclusions.contains(
+            &"report_sample_pairing_not_verified_caller_must_select_same_run_files".into()
+        )
+    );
+}
+
+#[test]
 fn unsuccessful_and_incomplete_outcomes_are_preserved_not_dropped() {
     for outcome in ["failed", "cancelled", "timed_out", "insufficient_duration"] {
         let imported = import_native_candidate_diagnostic(&report(outcome, false), b"").unwrap();

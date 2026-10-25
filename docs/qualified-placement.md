@@ -124,9 +124,12 @@ llm-cluster import-native-diagnostic --report report.json --samples samples.json
   > diagnostic-import.json
 ```
 
-The importer checks the exact kind/version and false eligibility flag, hashes
-the exact report and sample bytes, and retains the complete report plus every
-sample row in order. It preserves failed, canceled, running and incomplete
+The importer checks the exact kind/version and false eligibility flag, computes
+hashes of the supplied report and sample bytes, and retains the complete report
+plus every sample row in order. These hashes identify the supplied files; they
+do not verify that the files belong to the same profile run. The CLI accepts
+separate paths, and matching the samples to the report is the caller's
+responsibility. It preserves failed, canceled, running and incomplete
 outcomes; malformed or oversized input fails without a partial import. The
 versioned result is diagnostic-only and is not an `EvidenceRequest` or
 `RangeEvidence`. A passed status or renaming the schema cannot grant
