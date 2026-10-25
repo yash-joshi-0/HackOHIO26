@@ -839,11 +839,13 @@ async fn upstream_that_stops_reading_fails_the_session_at_the_ready_deadline() {
     );
 
     let job = new_job_id();
-    let stalled = Instant::now();
     let (mut entry, results) = tokio::join!(
         start_unread(&origin, worker.id(), &job),
         accept_results(&origin, worker.id())
     );
+    // Runner startup is not part of the Ready write deadline. The accepted result channel means
+    // the worker has finished setup and is about to write the readiness line upstream.
+    let stalled = Instant::now();
     assert!(!compute_is_idle(), "the session's runner holds a lease");
     expect_session_failed(&results.connection, stalled, SHORT_WRITES.control_line).await;
     expect_reset(&mut entry.recv).await;
