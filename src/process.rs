@@ -40,6 +40,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
 /// Longest HTTP status line read during a [`Readiness::HttpOk`] probe.
 const MAX_STATUS_LINE_LEN: u64 = 1024;
 
+/// Longest origin-form request target accepted for an HTTP readiness probe.
+const MAX_HTTP_PATH_LEN: usize = 2048;
+
 /// Maximum child output buffered for one tracing event; longer lines are split into chunks.
 const MAX_CHILD_LOG_LINE_BYTES: u64 = 8 * 1024;
 
@@ -55,11 +58,11 @@ const NO_PID: u32 = 0;
 pub enum Readiness {
     /// Ready once a TCP connect to this address succeeds.
     TcpPort(SocketAddr),
-    /// Ready once `GET http://{addr}{path}` returns HTTP 200 (plain HTTP/1.1 over a TcpStream).
+    /// Ready once `GET http://{addr}{path}` returns HTTP/1.0 or HTTP/1.1 status 200 over TCP.
     HttpOk {
         /// Address the child's HTTP server listens on.
         addr: SocketAddr,
-        /// Request path, starting with `/` (e.g. `/health`).
+        /// ASCII origin-form request path, starting with `/`, at most 2048 bytes, e.g. `/health`.
         path: String,
     },
 }
@@ -412,6 +415,12 @@ async fn connect(addr: SocketAddr) -> std::io::Result<TcpStream> {
 
 /// Sends a minimal HTTP/1.1 GET and reports whether the status code is 200.
 async fn http_ok(addr: SocketAddr, path: &str) -> std::io::Result<bool> {
+    if !valid_http_path(path) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "HTTP readiness path must be an ASCII origin-form path of at most 2048 bytes",
+        ));
+    }
     let mut stream = connect(addr).await?;
     let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).await?;
@@ -423,12 +432,23 @@ async fn http_ok(addr: SocketAddr, path: &str) -> std::io::Result<bool> {
     Ok(is_ok_status_line(&status_line))
 }
 
+fn valid_http_path(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() <= MAX_HTTP_PATH_LEN
+        && !path
+            .bytes()
+            .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'#' | b'\\'))
+}
+
 fn is_ok_status_line(line: &[u8]) -> bool {
+    if line.len() as u64 > MAX_STATUS_LINE_LEN || !line.ends_with(b"\r\n") {
+        return false;
+    }
     let line = String::from_utf8_lossy(line);
     let mut parts = line.split_ascii_whitespace();
     matches!(
         (parts.next(), parts.next()),
-        (Some(version), Some("200")) if version.starts_with("HTTP/1.")
+        (Some("HTTP/1.0" | "HTTP/1.1"), Some("200"))
     )
 }
 
@@ -496,7 +516,24 @@ mod tests {
         assert!(!is_ok_status_line(b"HTTP/1.1 503 Service Unavailable\r\n"));
         assert!(!is_ok_status_line(b"HTTP/1.1 2000 Odd\r\n"));
         assert!(!is_ok_status_line(b"SSH-2.0-OpenSSH 200\r\n"));
+        assert!(!is_ok_status_line(b"HTTP/1.2 200 OK\r\n"));
+        assert!(!is_ok_status_line(b"HTTP/1.1 200"));
+        assert!(!is_ok_status_line(b"HTTP/1.1 200 OK"));
+        assert!(!is_ok_status_line(b"HTTP/1.1 200 OK\n"));
         assert!(!is_ok_status_line(b""));
+    }
+
+    #[test]
+    fn readiness_path_must_be_safe_origin_form() {
+        assert!(valid_http_path("/health"));
+        assert!(valid_http_path("/health?full=1"));
+        assert!(!valid_http_path("health"));
+        assert!(!valid_http_path("/health\r\nX-Injected: yes"));
+        assert!(!valid_http_path("/health#fragment"));
+        assert!(!valid_http_path(&format!(
+            "/{}",
+            "x".repeat(MAX_HTTP_PATH_LEN)
+        )));
     }
 
     /// Serves one fixed HTTP response to every connection.
