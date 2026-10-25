@@ -17,13 +17,18 @@ use axum::{
 use clap::Args;
 use serde_json::{Value, json};
 use std::{
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
+use tokio::io::AsyncReadExt;
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_http::services::ServeDir;
+
+/// Preferences contain only a display name and refresh interval; reject unexpectedly large files.
+const MAX_PREFERENCES_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Args)]
 pub struct Options {
@@ -403,7 +408,7 @@ fn validate_preferences(value: Value) -> Result<Value> {
 }
 async fn preferences(State(app): State<Arc<App>>) -> Response {
     let _guard = app.preferences.lock().await;
-    match tokio::fs::read(app.directory.join("preferences.json")).await {
+    match read_preferences_file(&app.directory.join("preferences.json")).await {
         Ok(bytes) => match serde_json::from_slice(&bytes)
             .map_err(anyhow::Error::from)
             .and_then(validate_preferences)
@@ -416,6 +421,28 @@ async fn preferences(State(app): State<Arc<App>>) -> Response {
         }
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
+}
+
+/// Reads at most the preferences size limit, including when the file grows after metadata check.
+async fn read_preferences_file(path: &Path) -> io::Result<Vec<u8>> {
+    let file = tokio::fs::File::open(path).await?;
+    if file.metadata().await?.len() > MAX_PREFERENCES_BYTES as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("preferences file exceeds the {MAX_PREFERENCES_BYTES}-byte limit"),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_PREFERENCES_BYTES.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .await?;
+    if bytes.len() > MAX_PREFERENCES_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("preferences file exceeds the {MAX_PREFERENCES_BYTES}-byte limit"),
+        ));
+    }
+    Ok(bytes)
 }
 async fn save_preferences(State(app): State<Arc<App>>, Json(value): Json<Value>) -> Response {
     let value = match validate_preferences(value) {
@@ -433,5 +460,30 @@ async fn save_preferences(State(app): State<Arc<App>>, Json(value): Json<Value>)
     match result {
         Ok(()) => Json(value).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn preferences_reader_enforces_size_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        tokio::fs::write(&path, vec![b'x'; MAX_PREFERENCES_BYTES])
+            .await
+            .unwrap();
+        assert_eq!(
+            read_preferences_file(&path).await.unwrap().len(),
+            MAX_PREFERENCES_BYTES
+        );
+
+        tokio::fs::write(&path, vec![b'x'; MAX_PREFERENCES_BYTES + 1])
+            .await
+            .unwrap();
+        let error = read_preferences_file(&path).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("8192-byte limit"));
     }
 }
