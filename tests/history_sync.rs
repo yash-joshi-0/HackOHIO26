@@ -287,6 +287,22 @@ fn election_is_deterministic() {
 }
 
 #[test]
+fn election_fails_closed_when_epoch_space_is_exhausted() {
+    for (epoch, history_epoch) in [(u64::MAX, 0), (0, u64::MAX)] {
+        assert_eq!(
+            elect(&[Candidate {
+                id: id(1),
+                epoch,
+                history_epoch,
+                len: 1,
+                connected_at_unix_ms: 0,
+            }]),
+            None
+        );
+    }
+}
+
+#[test]
 fn messages_round_trip_through_wire_format() {
     let mut leader = Leader::new(id(7), 3, Default::default(), [id(1), id(2)]);
     for (_, msg) in leader.complete_task("job-0", "hello", "world") {

@@ -25,7 +25,8 @@ pub struct Elected {
 /// (newest history epoch, then most entries), then whichever peer has been
 /// connected the longest, then the lowest node ID. Every peer that sees the same
 /// candidate set picks the same winner. The new epoch is one above the highest
-/// epoch any candidate has heard of.
+/// epoch any candidate has heard of. Returns `None` when there are no candidates or the highest
+/// observed epoch is exhausted and cannot be incremented safely.
 ///
 /// Ranking uses the history's epoch, not the highest epoch heard (Raft's "last log
 /// term" rule): a peer that learned of a newer epoch but never received that
@@ -41,6 +42,7 @@ pub fn elect(candidates: &[Candidate]) -> Option<Elected> {
         .iter()
         .map(|c| c.epoch.max(c.history_epoch))
         .max()?;
+    let epoch = max_epoch.checked_add(1)?;
     let winner = candidates.iter().max_by(|a, b| {
         (a.history_epoch, a.len)
             .cmp(&(b.history_epoch, b.len))
@@ -49,6 +51,6 @@ pub fn elect(candidates: &[Candidate]) -> Option<Elected> {
     })?;
     Some(Elected {
         id: winner.id,
-        epoch: max_epoch + 1,
+        epoch,
     })
 }

@@ -69,7 +69,7 @@ Workers that are caught up get only new entries (`Append`). New workers, workers
 
 1. The main process goes away; its peers drop it from their `PeerTable`.
 2. Each surviving worker reports a `Candidate` (epoch, history length, connection time).
-3. `elect()` ranks them: **newest history (the epoch its history was written under, then its length), then connected longest, then lowest ID**. It returns the winner and an epoch one above the highest any candidate has heard of.
+3. `elect()` ranks them: **newest history (the epoch its history was written under, then its length), then connected longest, then lowest ID**. It returns the winner and an epoch one above the highest any candidate has heard of. If that epoch cannot be represented, election fails closed with `None`.
 4. The winner calls `Replica::promote`. The new leader records an `EpochAdvanced` event and makes every peer start with a `Snapshot`, so all copies converge on the winner's history.
 
 ### A stale main process comes back
@@ -275,6 +275,7 @@ Controls:
 - **The epoch lives with the history.** It's in `snapshot.json`, and changes after the snapshot are `{generation, epoch}` log lines. On load, the epoch is the highest of the snapshot's, the log's and the newest `EpochAdvanced` in the history. No crash can leave new history paired with an old epoch.
 - **Writes** (`record`) are one write per call, epoch line first, flushed with `sync_data` before returning.
 - **Atomic replacement:** write a temporary file, flush it, rename it over the old one, then flush the directory (Unix).
+- **Generation exhaustion:** `replace` returns an error if the snapshot generation reaches `u64::MAX`; wrapping would make old log lines appear current after a replacement.
 - **Compaction:** every 100 log entries, the log is folded into a new snapshot and truncated.
   Compaction happens after the synced append; if it fails, the append still succeeds and a warning
   is logged because the durable log remains the source of truth.
@@ -349,16 +350,16 @@ The demo runs three jobs with one dropped message and a retransmit. Then the mai
 
 ## 8. Tests
 
-`tests/history_sync.rs` (15): sync, failover and election.
+`tests/history_sync.rs` (17): sync, failover and election.
 - **Sync:** any number of nodes from 1 to 50; deltas after the first snapshot; repeated appends are harmless; dropped messages recovered; a gap triggers a snapshot.
 - **Failover:** continues from a worker's history (`EpochAdvanced` recorded); the most complete history wins; a stale main process is refused and resynced.
 - **Peers:** a disconnected peer stops being synced and catches up on rejoin; the leader's peer list follows `PeerTable`.
-- **Election and wire format:** the ranking is deterministic; longest-connected wins among equal histories; a newer history beats a longer, older one and the new epoch is above every epoch heard; every session records its epoch; messages survive a round trip.
+- **Election and wire format:** the ranking is deterministic; longest-connected wins among equal histories; a newer history beats a longer, older one and the new epoch is above every epoch heard; epoch exhaustion fails closed; every session records its epoch; messages survive a round trip.
 
-`tests/history_store.rs` (16): storage and export.
+`tests/history_store.rs` (18): storage and export.
 - **Reload:** history and epoch survive a restart.
 - **Epoch durability:** the epoch is stored with the history and `meta.json` is never rewritten; the epoch never goes down; a torn write keeps its epoch; the epoch is never below the newest `EpochAdvanced`; version-1 stores are refused.
-- **Crashes:** torn last line dropped; corrupt complete line reported; compaction and the crash after it; `replace` and the crash during it.
+- **Crashes:** torn last line dropped; corrupt complete line reported; compaction and the crash after it; `replace` and the crash during it; generation exhaustion fails without changing stored history.
 - **Refusals:** a different model or cluster; unsafe or missing conversation IDs.
 - **Export:** completed vs interrupted jobs, including chunk joining.
 - **Sync on disk:** a worker acks only what's saved; a restarted worker reloads and catches up; the main process saves before sending.
