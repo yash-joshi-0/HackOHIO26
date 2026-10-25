@@ -115,7 +115,7 @@ impl ArtifactCache {
         let _lock = self.lock(cancel).await?;
         let path = self.path(hash, "keep");
         if retained {
-            fs::write(path, []).await?;
+            ensure_keep_marker(&path).await?;
         } else {
             remove_if_exists(&path).await?;
         }
@@ -189,7 +189,7 @@ impl ArtifactCache {
                 Ok(()) => {
                     remove_if_exists(&partial).await?;
                     self.reserve(hash, manifest.bytes, 0).await?;
-                    fs::write(self.path(hash, "used"), []).await?;
+                    touch_used_marker(&self.path(hash, "used")).await?;
                     self.emit(manifest, Phase::Staged, manifest.bytes);
                     return Ok(target);
                 }
@@ -271,7 +271,7 @@ impl ArtifactCache {
         fs::rename(&partial, &target).await?;
         #[cfg(unix)]
         std::fs::File::open(&self.root)?.sync_all()?;
-        fs::write(self.path(hash, "used"), []).await?;
+        touch_used_marker(&self.path(hash, "used")).await?;
         self.emit(manifest, Phase::Staged, manifest.bytes);
         Ok(target)
     }
@@ -302,9 +302,12 @@ impl ArtifactCache {
             used = used
                 .checked_add(meta.len())
                 .context("cache size overflow")?;
-            if !fs::try_exists(self.path(hash, "keep")).await? {
-                let accessed = match fs::metadata(self.path(hash, "used")).await {
-                    Ok(used) => used.modified()?,
+            if !marker_exists(&self.path(hash, "keep")).await? {
+                let accessed = match fs::symlink_metadata(self.path(hash, "used")).await {
+                    Ok(used) => {
+                        ensure!(used.is_file(), "cache marker must be a regular file");
+                        used.modified()?
+                    }
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => meta.modified()?,
                     Err(e) => return Err(e.into()),
                 };
@@ -351,11 +354,112 @@ async fn regular_size(path: &Path) -> Result<Option<u64>> {
         Err(e) => Err(e.into()),
     }
 }
+async fn marker_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path).await {
+        Ok(metadata) => {
+            ensure!(metadata.is_file(), "cache marker must be a regular file");
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+async fn ensure_keep_marker(path: &Path) -> Result<()> {
+    create_marker(path, true).await
+}
+async fn touch_used_marker(path: &Path) -> Result<()> {
+    // Unlinking removes a symlink itself, never the file it points to. `create_new` below
+    // then refuses to follow a replacement symlink created concurrently.
+    remove_if_exists(path).await?;
+    create_marker(path, false).await
+}
+async fn create_marker(path: &Path, durable: bool) -> Result<()> {
+    let file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            ensure!(marker_exists(path).await?, "cache marker disappeared");
+            if durable {
+                sync_marker_parent(path)?;
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if durable {
+        file.sync_all().await?;
+        sync_marker_parent(path)?;
+    }
+    Ok(())
+}
+#[cfg(unix)]
+fn sync_marker_parent(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("cache marker has no parent directory")?;
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+#[cfg(not(unix))]
+fn sync_marker_parent(_path: &Path) -> Result<()> {
+    Ok(())
+}
 async fn remove_if_exists(path: &Path) -> Result<()> {
     match fs::remove_file(path).await {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod marker_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[tokio::test]
+    async fn retention_marker_is_idempotent_for_regular_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("artifact.keep");
+
+        ensure_keep_marker(&marker).await.unwrap();
+        ensure_keep_marker(&marker).await.unwrap();
+
+        let metadata = std::fs::symlink_metadata(marker).unwrap();
+        assert!(metadata.is_file());
+        assert_eq!(metadata.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn retention_refuses_a_symlink_marker_without_touching_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        let marker = dir.path().join("artifact.keep");
+        std::fs::write(&victim, b"keep me").unwrap();
+        symlink(&victim, &marker).unwrap();
+
+        let error = ensure_keep_marker(&marker).await.unwrap_err();
+
+        assert!(error.to_string().contains("regular file"));
+        assert_eq!(std::fs::read(victim).unwrap(), b"keep me");
+    }
+
+    #[tokio::test]
+    async fn refreshing_lru_marker_replaces_symlink_without_touching_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        let marker = dir.path().join("artifact.used");
+        std::fs::write(&victim, b"keep me").unwrap();
+        symlink(&victim, &marker).unwrap();
+
+        touch_used_marker(&marker).await.unwrap();
+
+        assert!(std::fs::symlink_metadata(marker).unwrap().is_file());
+        assert_eq!(std::fs::read(victim).unwrap(), b"keep me");
     }
 }
 pub(crate) async fn verify_file(
