@@ -11,7 +11,7 @@ use llm_cluster::history_sync::message::SyncMessage;
 use llm_cluster::history_sync::node::Node;
 use llm_cluster::history_sync::sim::node_id as id;
 use llm_cluster::history_sync::store::{
-    HistoryStore, JobStatus, ModelManifest, SNAPSHOT_EVERY, StoreError, StoreMeta,
+    HistoryStore, JobStatus, ModelManifest, SNAPSHOT_EVERY, StoreError, StoreMeta, job_states,
 };
 
 const CONVERSATION: &str = "conv-1";
@@ -306,6 +306,45 @@ fn export_separates_completed_and_interrupted_jobs() {
         serde_json::from_str::<serde_json::Value>(&json).unwrap()["format_version"],
         1
     );
+}
+
+#[test]
+fn job_state_index_keeps_reused_request_ids_attached_to_the_latest_start() {
+    let history = History::from_entries(vec![
+        Entry::JobStarted {
+            request_id: "reused".into(),
+            prompt: "first prompt".into(),
+        },
+        Entry::OutputCommitted {
+            request_id: "reused".into(),
+            offset: 0,
+            text: "first reply".into(),
+        },
+        Entry::JobCompleted {
+            request_id: "reused".into(),
+        },
+        Entry::JobStarted {
+            request_id: "reused".into(),
+            prompt: "second prompt".into(),
+        },
+        Entry::OutputCommitted {
+            request_id: "reused".into(),
+            offset: 0,
+            text: "second reply".into(),
+        },
+        Entry::JobCompleted {
+            request_id: "reused".into(),
+        },
+    ]);
+
+    let jobs = job_states(&history);
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs[0].prompt, "first prompt");
+    assert_eq!(jobs[0].committed_output, "first reply");
+    assert_eq!(jobs[0].status, JobStatus::Completed);
+    assert_eq!(jobs[1].prompt, "second prompt");
+    assert_eq!(jobs[1].committed_output, "second reply");
+    assert_eq!(jobs[1].status, JobStatus::Completed);
 }
 
 #[test]

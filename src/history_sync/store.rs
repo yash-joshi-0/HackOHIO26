@@ -12,7 +12,7 @@
 //! dropped, log lines the snapshot already covers are skipped, and lines from before a
 //! [`HistoryStore::replace`] carry an older generation and are ignored.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -486,21 +486,28 @@ pub struct JobState {
 /// earlier bytes, or leaves a gap, is ignored. Events for unknown requests are ignored.
 pub fn job_states(history: &History) -> Vec<JobState> {
     let mut jobs: Vec<JobState> = Vec::new();
+    let mut latest_by_id = HashMap::new();
     for entry in history.entries() {
         match entry {
-            Entry::JobStarted { request_id, prompt } => jobs.push(JobState {
-                request_id: request_id.clone(),
-                prompt: prompt.clone(),
-                status: JobStatus::Interrupted,
-                committed_output: String::new(),
-                committed_output_offset: 0,
-            }),
+            Entry::JobStarted { request_id, prompt } => {
+                let index = jobs.len();
+                jobs.push(JobState {
+                    request_id: request_id.clone(),
+                    prompt: prompt.clone(),
+                    status: JobStatus::Interrupted,
+                    committed_output: String::new(),
+                    committed_output_offset: 0,
+                });
+                latest_by_id.insert(request_id.as_str(), index);
+            }
             Entry::OutputCommitted {
                 request_id,
                 offset,
                 text,
             } => {
-                if let Some(job) = find_job(&mut jobs, request_id)
+                if let Some(job) = latest_by_id
+                    .get(request_id.as_str())
+                    .and_then(|&index| jobs.get_mut(index))
                     && *offset == job.committed_output_offset
                 {
                     job.committed_output.push_str(text);
@@ -508,7 +515,10 @@ pub fn job_states(history: &History) -> Vec<JobState> {
                 }
             }
             Entry::JobCompleted { request_id } => {
-                if let Some(job) = find_job(&mut jobs, request_id) {
+                if let Some(job) = latest_by_id
+                    .get(request_id.as_str())
+                    .and_then(|&index| jobs.get_mut(index))
+                {
                     job.status = JobStatus::Completed;
                 }
             }
@@ -516,13 +526,6 @@ pub fn job_states(history: &History) -> Vec<JobState> {
         }
     }
     jobs
-}
-
-/// The most recent job with `request_id`.
-fn find_job<'a>(jobs: &'a mut [JobState], request_id: &str) -> Option<&'a mut JobState> {
-    jobs.iter_mut()
-        .rev()
-        .find(|job| job.request_id == request_id)
 }
 
 /// `<data_dir>/history/<conversation_id>`, after checking the ID is a safe directory name.
