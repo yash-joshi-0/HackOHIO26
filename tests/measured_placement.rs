@@ -244,3 +244,62 @@ fn rejects_ambiguous_or_malformed_profiles() {
     value["workload"]["unknown_budget"] = 999.into();
     assert!(serde_json::from_value::<MeasuredRequest>(value).is_err());
 }
+
+#[test]
+fn bounds_search_state_growth_and_profile_labels() {
+    let mut input = request();
+    input.peers[0].ranges[0].profile_id = "x".repeat(257);
+    assert!(matches!(plan(&input), Err(MeasuredError::InvalidInput(_))));
+    let mut input = request();
+    input.peers[0].ranges = vec![input.peers[0].ranges[0].clone(); 4097];
+    assert!(matches!(
+        plan(&input),
+        Err(MeasuredError::InvalidInput(message)) if message.contains("4096 range observations")
+    ));
+
+    let mut workload = workload();
+    workload.layers = 20;
+    let mut peers = Vec::new();
+    for peer_index in 0..8 {
+        let id = format!("peer-{peer_index}");
+        let mut observations = Vec::new();
+        for begin in 0..workload.layers {
+            for end in begin + 1..=workload.layers {
+                let mut observation = range(begin, end, 1, &format!("{id}-{begin}-{end}"));
+                observation.workload = workload.clone();
+                observations.push(observation);
+            }
+        }
+        peers.push(peer(&id, observations));
+    }
+    let mut links = Vec::new();
+    for from in 0..peers.len() {
+        for to in 0..peers.len() {
+            if from == to {
+                continue;
+            }
+            for payload in [
+                workload.control_payload_bytes,
+                workload.activation_payload_bytes,
+            ] {
+                let mut observation = link(&peers[from].id, &peers[to].id, payload, 1);
+                observation.workload = workload.clone();
+                links.push(observation);
+            }
+        }
+    }
+    let dense = MeasuredRequest {
+        schema_version: 1,
+        workload,
+        origin_peer_id: peers[0].id.clone(),
+        observed_at_unix_ms: 1000,
+        max_profile_age_ms: 200,
+        min_peers: 2,
+        peers,
+        links,
+    };
+    assert!(matches!(
+        plan(&dense),
+        Err(MeasuredError::InvalidInput(message)) if message.contains("16384 states")
+    ));
+}

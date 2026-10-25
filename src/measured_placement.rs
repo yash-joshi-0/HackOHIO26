@@ -7,6 +7,10 @@ use std::ops::Range;
 
 const MAX_PEERS: usize = 8;
 const MAX_LAYERS: usize = 1024;
+const MAX_SEARCH_STATES: usize = 16_384;
+const MAX_LABEL_BYTES: usize = 256;
+const MAX_RANGE_OBSERVATIONS_PER_PEER: usize = 4_096;
+const MAX_LINK_OBSERVATIONS: usize = 4_096;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -188,6 +192,7 @@ fn plan_with_topology(
     if request.schema_version != 1
         || !valid_sha256(&request.workload.model_sha256)
         || request.workload.runtime_id.is_empty()
+        || request.workload.runtime_id.len() > MAX_LABEL_BYTES
         || request.workload.layers == 0
         || request.workload.layers > MAX_LAYERS
         || request.workload.context_tokens == 0
@@ -203,14 +208,20 @@ fn plan_with_topology(
     }
     let mut ids = HashSet::new();
     for peer in &request.peers {
-        if peer.id.is_empty() || !ids.insert(peer.id.as_str()) {
-            return Err(invalid("peer IDs must be nonempty and unique"));
+        if peer.ranges.len() > MAX_RANGE_OBSERVATIONS_PER_PEER {
+            return Err(invalid("a peer has more than 4096 range observations"));
+        }
+        if peer.id.is_empty() || peer.id.len() > MAX_LABEL_BYTES || !ids.insert(peer.id.as_str()) {
+            return Err(invalid(
+                "peer IDs must be nonempty, unique, and at most 256 bytes",
+            ));
         }
         for range in &peer.ranges {
             if range.begin >= range.end
                 || range.end > request.workload.layers
                 || range.decode_us == 0
                 || range.profile_id.is_empty()
+                || range.profile_id.len() > MAX_LABEL_BYTES
             {
                 return Err(invalid("invalid range observation"));
             }
@@ -219,6 +230,9 @@ fn plan_with_topology(
     if !ids.contains(request.origin_peer_id.as_str()) {
         return Err(invalid("origin must be a candidate peer"));
     }
+    if request.links.len() > MAX_LINK_OBSERVATIONS {
+        return Err(invalid("request has more than 4096 link observations"));
+    }
     for edge in &request.links {
         if edge.from == edge.to
             || !ids.contains(edge.from.as_str())
@@ -226,7 +240,9 @@ fn plan_with_topology(
             || edge.payload_bytes == 0
             || edge.transfer_us == 0
             || edge.profile_id.is_empty()
+            || edge.profile_id.len() > MAX_LABEL_BYTES
             || edge.path.is_empty()
+            || edge.path.len() > MAX_LABEL_BYTES
         {
             return Err(invalid("invalid link observation"));
         }
@@ -330,7 +346,7 @@ fn plan_with_topology(
                 }],
                 links: ingress.map_or_else(Vec::new, |edge| vec![edge.profile_id.clone()]),
             };
-            insert_cheaper(&mut states, (1 << index, index, *end), candidate);
+            insert_cheaper(&mut states, (1 << index, index, *end), candidate)?;
         }
     }
     let subset_limit = 1usize << active.len();
@@ -371,7 +387,11 @@ fn plan_with_topology(
                             charged_bytes: charged.clone(),
                             decode_us: range.decode_us,
                         });
-                        insert_cheaper(&mut states, (mask | (1 << next), next, *finish), candidate);
+                        insert_cheaper(
+                            &mut states,
+                            (mask | (1 << next), next, *finish),
+                            candidate,
+                        )?;
                     }
                 }
             }
@@ -466,13 +486,18 @@ fn insert_cheaper(
     states: &mut HashMap<(usize, usize, usize), Candidate>,
     key: (usize, usize, usize),
     candidate: Candidate,
-) {
+) -> Result<(), MeasuredError> {
     if states
         .get(&key)
-        .is_none_or(|current| better(&candidate, current))
+        .is_some_and(|current| !better(&candidate, current))
     {
-        states.insert(key, candidate);
+        return Ok(());
     }
+    if !states.contains_key(&key) && states.len() >= MAX_SEARCH_STATES {
+        return Err(invalid("exact search exceeds 16384 states"));
+    }
+    states.insert(key, candidate);
+    Ok(())
 }
 
 fn better(candidate: &Candidate, current: &Candidate) -> bool {

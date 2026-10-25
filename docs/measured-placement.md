@@ -74,6 +74,9 @@ charged memory, contributing profile IDs, planning time and predicted decode
 time. It is a prediction for one sequential request, not a throughput or
 prefill estimate. `measured_placement::validate_output` recomputes a saved plan
 against refreshed inputs and rejects changed or expired profiles.
+To bound validation and exact-search memory, the planner accepts at most 4,096
+range observations per peer and 4,096 links, rejects labels longer than 256
+UTF-8 bytes, and stops if it would retain more than 16,384 search states.
 
 ## Version 2 evidence contract (proposal)
 
