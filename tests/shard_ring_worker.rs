@@ -18,7 +18,8 @@ use llm_cluster::shard::ring::{
     ExecuteFrame, RING_ALPN, RingMessage, RingResult, RingStageInfo, RingStream, RingWorkerConfig,
     RingWriteTimeouts, accept_result_channel, encode_activations, new_job_id, open_ring_session,
     read_control, read_result, read_result_channel_hello, serve_ring_worker,
-    serve_ring_worker_with, validate_chain, write_control, write_execute,
+    serve_ring_worker_with, serve_ring_worker_with_limits, validate_chain, write_control,
+    write_execute,
 };
 use llm_cluster::shard::serve::PLACEHOLDER_PROMPT;
 use llm_cluster::shard::wire;
@@ -968,4 +969,71 @@ async fn wrong_expected_sha256_fails_at_startup() {
     let error = result.expect_err("a mismatched model must be refused");
     assert!(error.to_string().contains("checksum mismatch"), "{error:#}");
     endpoint.close().await;
+}
+
+async fn queued_profile_session_is_cancelled(mode: &str) {
+    let _exclusive = COMPUTE.write().await;
+    let mesh = Mesh::new();
+    let origin = mesh.bind().await;
+    let endpoint = mesh.bind().await;
+    let config = worker_config(LONE, origin.id(), origin.id(), None);
+    let bound = if mode == "deadline" {
+        Duration::from_millis(200)
+    } else {
+        Duration::from_secs(30)
+    };
+    let task = tokio::spawn(serve_ring_worker_with_limits(
+        endpoint.clone(),
+        config,
+        SHORT_WRITES,
+        bound,
+    ));
+    let worker = Worker { endpoint, task };
+    let owner = ComputeAdmission::process();
+    let profile = owner.try_profile().expect("idle before starting profile");
+    let mut session = start_unread(&origin, worker.id(), &new_job_id()).await;
+    match mode {
+        "finish" => {
+            session._send.finish().unwrap();
+        }
+        "stop" => {
+            session.recv.get_mut().stop(SESSION_FAILED).unwrap();
+        }
+        "deadline" => {}
+        _ => unreachable!(),
+    }
+    // The worker must acknowledge failure while profiling STILL owns admission.
+    // Releasing the profile first would hide a delayed abandoned native spawn.
+    if mode == "stop" {
+        timeout(EXPIRY_SLACK, session._send.stopped())
+            .await
+            .expect("worker stopped the queued session's input")
+            .unwrap();
+    } else {
+        timeout(EXPIRY_SLACK, expect_reset(&mut session.recv))
+            .await
+            .expect("worker reset queued session without waiting for profile release");
+    }
+    assert!(!owner.is_fenced());
+    drop(profile);
+    drop(session);
+    expect_recovered(&origin, worker.id(), Some(worker.id())).await;
+    wait_for_idle_compute().await;
+    origin.close().await;
+    worker.shut_down().await;
+}
+
+#[tokio::test]
+async fn upstream_finish_cancels_profile_admission_wait_before_native_spawn() {
+    queued_profile_session_is_cancelled("finish").await;
+}
+
+#[tokio::test]
+async fn upstream_stop_cancels_profile_admission_wait_before_native_spawn() {
+    queued_profile_session_is_cancelled("stop").await;
+}
+
+#[tokio::test]
+async fn profile_admission_deadline_releases_session_gate_before_profile_finishes() {
+    queued_profile_session_is_cancelled("deadline").await;
 }

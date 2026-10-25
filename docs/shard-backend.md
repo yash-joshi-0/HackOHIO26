@@ -313,6 +313,15 @@ always 0). `read_us` includes every worker's compute time, so it is not a networ
   with its activations. A peer that stops reading fails the session like any other error: the
   upstream stream is reset, the downstream or result connection is closed with code 1 ("ring
   session failed"), the runner is killed and reaped, and the worker takes the next session.
+- A session waiting for the shared compute owner (for example, during an admitted
+  profile) observes upstream EOF/reset or stopped reception before spawning its
+  runner. Unexpected data before readiness also fails the session. The admission
+  wait is bounded to 60 s by default; cancellation/deadline wins over a
+  simultaneously available lease. The failed session is reset and its ring gate
+  released while profiling continues. The existing admitted-child owner still
+  controls process exit and reaping once a runner has started.
+  Embedders can use serve_ring_worker_with_limits for an explicit admission bound
+  up to the existing control-line timeout. Write bounds keep their separate scope.
 - Chat templates work as in pipeline mode: the leader renders the prompt for its local stage
   0. To match david-codex's ring demo, use the pinned official Qwen template with
   `enable_thinking: false` (see [Chat templates](#chat-templates)).

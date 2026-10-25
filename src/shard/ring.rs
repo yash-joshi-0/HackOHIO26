@@ -81,6 +81,9 @@ pub const NATIVE_STEP_TIMEOUT: Duration =
 /// How long a worker may take to connect to its next peer or to the origin.
 pub const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Bound on waiting for the shared compute owner before any native child is spawned.
+pub const COMPUTE_ADMISSION_TIMEOUT: Duration = PEER_CONNECT_TIMEOUT;
+
 /// After a clean session end, how long the next hop may take to finish its own streams.
 pub const STREAM_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -744,6 +747,21 @@ pub async fn serve_ring_worker_with(
     config: RingWorkerConfig,
     timeouts: RingWriteTimeouts,
 ) -> anyhow::Result<()> {
+    serve_ring_worker_with_limits(endpoint, config, timeouts, COMPUTE_ADMISSION_TIMEOUT).await
+}
+
+/// Worker write limits plus a bounded wait for shared inference/profiling admission.
+/// Admission waiting observes upstream closure before allowing a native spawn.
+pub async fn serve_ring_worker_with_limits(
+    endpoint: Endpoint,
+    config: RingWorkerConfig,
+    timeouts: RingWriteTimeouts,
+    admission_timeout: Duration,
+) -> anyhow::Result<()> {
+    ensure!(
+        !admission_timeout.is_zero() && admission_timeout <= CONTROL_LINE_TIMEOUT,
+        "invalid ring compute admission timeout"
+    );
     let shard = Shard::load(config.shard_config()).await?;
     info!(
         id = %endpoint.id(),
@@ -763,6 +781,7 @@ pub async fn serve_ring_worker_with(
         next: config.next,
         gate: Semaphore::new(1),
         timeouts,
+        admission_timeout,
     });
 
     let connection_slots = Arc::new(Semaphore::new(MAX_RING_CONNECTIONS));
@@ -802,6 +821,99 @@ struct RingWorker {
     next: Option<EndpointId>,
     gate: Semaphore,
     timeouts: RingWriteTimeouts,
+    admission_timeout: Duration,
+}
+
+/// Cancellation and the deadline win over a simultaneously available lease.
+async fn wait_for_compute<T>(
+    limit: Duration,
+    cancelled: impl std::future::Future<Output = anyhow::Result<()>>,
+    spawn: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    tokio::select! {
+        biased;
+        result = cancelled => {
+            result?;
+            bail!("ring session cancelled while waiting for compute");
+        }
+        _ = tokio::time::sleep(limit) => bail!("ring compute admission timed out"),
+        result = spawn => result,
+    }
+}
+
+#[cfg(test)]
+mod admission_wait_tests {
+    use super::*;
+    use crate::admission::ComputeAdmission;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::oneshot;
+
+    async fn blocked_start_is_dropped(cancel: bool) {
+        let owner = ComputeAdmission::default();
+        let profile = owner.try_profile().unwrap();
+        let owner_for_start = owner.clone();
+        let spawned = Arc::new(AtomicBool::new(false));
+        let started_flag = Arc::clone(&spawned);
+        let (entered, entering) = oneshot::channel();
+        let (stop, stopped) = oneshot::channel();
+        let start = async move {
+            entered.send(()).unwrap();
+            let _lease = owner_for_start.inference().await?;
+            started_flag.store(true, Ordering::SeqCst);
+            Ok(())
+        };
+        let task = tokio::spawn(wait_for_compute(
+            if cancel {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_millis(25)
+            },
+            async {
+                stopped.await?;
+                Ok(())
+            },
+            start,
+        ));
+        entering.await.unwrap();
+        if cancel {
+            stop.send(()).unwrap();
+        }
+        let error = task.await.unwrap().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(if cancel { "cancelled" } else { "timed out" })
+        );
+        drop(profile);
+        tokio::task::yield_now().await;
+        assert!(
+            !spawned.load(Ordering::SeqCst),
+            "cancelled waiter started work after profile release"
+        );
+        assert!(owner.try_profile().is_ok());
+    }
+
+    #[tokio::test]
+    async fn cancelled_profile_wait_cannot_start_late() {
+        blocked_start_is_dropped(true).await;
+    }
+
+    #[tokio::test]
+    async fn expired_profile_wait_cannot_start_late() {
+        blocked_start_is_dropped(false).await;
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_when_compute_is_already_available() {
+        let called = AtomicBool::new(false);
+        let result = wait_for_compute(Duration::from_secs(1), async { Ok(()) }, async {
+            called.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .await;
+        assert!(result.is_err());
+        assert!(!called.load(Ordering::SeqCst));
+    }
 }
 
 /// One Iroh connection: refuse anyone but the upstream, then serve its streams in turn.
@@ -914,7 +1026,7 @@ impl RingWorker {
         };
         validate_job_id(&job)?;
         stats.job.clone_from(&job);
-        let mut runner = NativeRunner::spawn(&self.shard).await?;
+        let mut runner = self.spawn_when_active(upstream, writer).await?;
         let outcome: anyhow::Result<()> = async {
             let meta = runner.start(&self.shard).await?;
             let mut hop = self.ready_hop(job, meta, writer).await?;
@@ -930,6 +1042,34 @@ impl RingWorker {
             warn!(%status, "shard runner exited unsuccessfully");
         }
         Ok(())
+    }
+
+    async fn spawn_when_active(
+        &self,
+        upstream: &mut BufReader<RecvStream>,
+        writer: &Upstream,
+    ) -> anyhow::Result<NativeRunner> {
+        // No progress relay exists before the runner starts, so this lock has
+        // no competing writer. Release it before metadata/readiness handling.
+        let send = writer.lock().await;
+        let cancelled = async {
+            tokio::select! {
+                incoming = upstream.fill_buf() => match incoming {
+                    Ok([]) => bail!("upstream closed while waiting for compute"),
+                    Ok(_) => bail!("upstream sent data before ring readiness"),
+                    Err(error) => Err(error).context("upstream failed while waiting for compute"),
+                },
+                stopped = send.stopped() => {
+                    bail!("upstream stopped receiving while waiting for compute: {stopped:?}");
+                },
+            }
+        };
+        wait_for_compute(
+            self.admission_timeout,
+            cancelled,
+            NativeRunner::spawn(&self.shard),
+        )
+        .await
     }
 
     /// Checks our stage, sets up the next hop (or the result channel) and sends `ready`.
