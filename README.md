@@ -35,15 +35,17 @@ The **prompted device** (the one where the user enters a prompt) runs two proces
 **Non-prompted devices** run only a worker process. They receive the prompt and the activations they need, compute their layers, and pass results along.
  
 ### History sync and failover
-After every completed task, the main process sends the full conversation history to the workers on all non-prompted devices. Every peer therefore holds an up-to-date copy of the session.
+The repository includes a history-sync protocol, simulator, and on-disk store, but the running `leader` and `worker` processes do not yet exchange history or persist inference turns. The sequence below describes the intended behavior once that wiring is complete; failover from a live inference session is not currently available. See [history sync and storage](docs/history-sync.md) for the implementation status and details.
+
+After each completed task, the intended design sends new history entries to workers that are up to date. A new or out-of-date worker receives a full snapshot instead.
  
-If the prompted device drops out (crash, sleep, network loss):
+When live history sync is available, the planned recovery flow after the prompted device drops out (crash, sleep, network loss) is:
  
 1. Workers detect the lost connection to the main process.
 2. One non-prompted device is chosen to take over.
 3. That device starts a new main process, seeded from its copy of the history.
 4. Layers held by the departed device are reassigned to the remaining peers, and the session continues.
-Because history is synced after each task, at most the in-progress task is lost and can be re-run.
+If history has been synced after each task, only the in-progress task should need to be re-run.
  
 ## Architecture
  
@@ -51,7 +53,7 @@ Because history is synced after each task, at most the in-progress task is lost 
             Prompted device                     Non-prompted devices
   ┌──────────────────────────────┐        ┌─────────────────────────┐
   │  Main process  ──coordinates──┼──────▶ │  Worker (layers k..m)   │
-  │  Worker (layers 0..k)        │◀──────▶│  + history replica      │
+  │  Worker (layers 0..k)        │◀──────▶│  + planned history copy │
   └──────────────────────────────┘        └─────────────────────────┘
                  ▲          Iroh QUIC mesh            │
                  └─────────── activations ────────────┘
@@ -59,9 +61,9 @@ Because history is synced after each task, at most the in-progress task is lost 
  
 ## Open questions
  
-- **Leader election** – how the replacement main process is chosen (lowest node ID, most free memory, a consensus round, etc.) and how split-brain is avoided if the original device comes back.
+- **Leader election** – the prototype ranks history-sync candidates, but live election is not wired into the runtime and the ranking is not consensus; preventing split-brain remains unresolved.
 - **Layer rebalancing** – whether peers keep spare copies of neighboring layers to make failover faster.
-- **History size** – full history on every peer is simple but grows over long sessions; diffs or snapshots may be needed.
+- **History retention** – the prototype supports append messages and snapshots, but retention and compaction policy for long-running conversations remain unresolved.
 - **Security** – activations and history are visible to every peer, so the mesh should only include trusted devices.
 ## Status
  
