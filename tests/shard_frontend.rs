@@ -17,12 +17,15 @@ use iroh::address_lookup::memory::MemoryLookup;
 use iroh::endpoint::{Connection, presets};
 use iroh::{Endpoint, EndpointAddr, RelayMode};
 use llm_cluster::protocol::RPC_BRIDGE_ALPN;
+use llm_cluster::rpc_bridge::PeerAllowlist;
+use llm_cluster::shard::balance::{BalanceInput, NodeMemory, plan_layers};
 use llm_cluster::shard::frontend::{FrontendConfig, MAX_GENERATION_RETRIES, serve_frontend};
 use llm_cluster::shard::manifest::{ShardManifest, sha256_file};
 use llm_cluster::shard::pipeline::{
     FailureClass, FinishReason, GenerationLimits, GenerationState, LocalLaunch, Pipeline,
-    StageExpectation, StageIdentity, StageLink, classify,
+    StageExpectation, StageIdentity, StageLink, classify, probe_remote,
 };
+use llm_cluster::shard::serve::{ShardServeConfig, ShardServeOptions, serve_shard_with};
 use llm_cluster::shard::wire::{self, MAX_BATCH_TOKENS};
 use serde_json::{Value, json};
 use tokio::io::{AsyncWriteExt, BufReader};
@@ -312,6 +315,12 @@ impl Frontend {
             lookup.add_endpoint_info(direct_addr(worker));
         }
         let endpoint = bind_endpoint(Vec::new(), Some(lookup)).await;
+        Self::start_on(manifest, endpoint).await
+    }
+
+    /// Starts the frontend dialling from `endpoint`, already bound with its address lookup.
+    async fn start_on(manifest: ShardManifest, endpoint: Endpoint) -> Self {
+        init_tracing();
         let addr = free_loopback_addr();
         let (shutdown, stopped) = oneshot::channel::<()>();
         let config = FrontendConfig {
@@ -1156,4 +1165,294 @@ async fn pipeline_rejects_links_that_do_not_match_their_expectations() {
         .err()
         .expect("final stage first");
     assert!(format!("{error:#}").contains("final stage"), "{error:#}");
+}
+
+/// Layers in the model the balanced tests split.
+const BALANCED_LAYERS: u32 = 16;
+/// Memory one layer costs in the balanced tests' manifests.
+const BALANCED_LAYER_BYTES: u64 = 1000;
+/// Memory the leader offers its own stage in the balanced tests.
+const LEADER_OFFER: u64 = 8 * BALANCED_LAYER_BYTES;
+
+/// Writes a plain fake model of [`BALANCED_LAYERS`] layers and returns its path and hash.
+fn write_balanced_model() -> (PathBuf, String) {
+    let path = temp_path("full-model.json");
+    let model =
+        json!({"layers": BALANCED_LAYERS, "embd": 8, "vocab": 300, "reply": fixture_reply()});
+    std::fs::write(&path, model.to_string()).expect("write balanced model");
+    let hash = sha256_file(&path).expect("hash balanced model");
+    (path, hash)
+}
+
+/// A balanced manifest over `model` with no reserve or overheads, so each node's weight is
+/// exactly what it offers; the leader's runner logs its requests to `log`.
+fn balanced_manifest(
+    model: &Path,
+    hash: &str,
+    candidates: &[&Endpoint],
+    log: &Path,
+) -> ShardManifest {
+    let candidates: Vec<String> = candidates
+        .iter()
+        .map(|worker| worker.id().to_string())
+        .collect();
+    let value = json!({
+        "runner": example_bin("fake_shard_runner"),
+        "model_sha256": hash,
+        "layers": BALANCED_LAYERS,
+        "context": CONTEXT,
+        "max_tokens": 256,
+        "chat_template": "chatml",
+        "balance": {
+            "candidates": candidates,
+            "local": {
+                "model": model,
+                "budget_bytes": BUDGET_BYTES,
+                "offer_bytes": LEADER_OFFER,
+                "env": {LOG_ENV: log},
+            },
+            "layer_bytes": BALANCED_LAYER_BYTES,
+            "stage_overhead_bytes": 0,
+            "reserve_bytes": 0,
+        },
+    });
+    let manifest: ShardManifest = serde_json::from_value(value).expect("parse balanced manifest");
+    manifest.validate().expect("valid balanced manifest");
+    manifest
+}
+
+/// Where the cut falls when a remote offering `remote_offer` joins the leader.
+fn expected_cut(remote_offer: u64) -> u32 {
+    let nodes = [
+        NodeMemory {
+            budget_bytes: remote_offer,
+            fixed_bytes: 0,
+        },
+        NodeMemory {
+            budget_bytes: LEADER_OFFER,
+            fixed_bytes: 0,
+        },
+    ];
+    let plan = plan_layers(&BalanceInput {
+        nodes: &nodes,
+        layer_bytes: &[BALANCED_LAYER_BYTES; BALANCED_LAYERS as usize],
+        first_stage_bytes: 0,
+    })
+    .expect("a plan");
+    assert_eq!(plan.len(), 2, "{plan:?}");
+    plan[0].end
+}
+
+/// A real `shard-serve` holding the full model and offering `offer_bytes`.
+struct FullModelWorker {
+    endpoint: Endpoint,
+    task: JoinHandle<anyhow::Result<()>>,
+}
+
+impl FullModelWorker {
+    async fn start(
+        model: &Path,
+        hash: &str,
+        runner: PathBuf,
+        offer_bytes: u64,
+        leader: &Endpoint,
+    ) -> Self {
+        let endpoint = bind_endpoint(vec![RPC_BRIDGE_ALPN.to_vec()], None).await;
+        let config = ShardServeConfig {
+            expected_sha256: hash.to_owned(),
+            runner,
+            model: model.to_path_buf(),
+            begin: 0,
+            end: BALANCED_LAYERS,
+            context: CONTEXT,
+            gpu_layers: 0,
+            budget_bytes: BUDGET_BYTES,
+            source_sha256: None,
+        };
+        let options = ShardServeOptions {
+            layers: Some(BALANCED_LAYERS),
+            offer_bytes: Some(offer_bytes),
+        };
+        let allowed = PeerAllowlist::new([leader.id()]).expect("allowlist");
+        let task = tokio::spawn(serve_shard_with(endpoint.clone(), config, options, allowed));
+        Self { endpoint, task }
+    }
+
+    async fn stop(self) {
+        self.endpoint.close().await;
+        self.task.abort();
+    }
+}
+
+/// The leader's endpoint, bound first so workers can allowlist it, and its address lookup.
+async fn bind_leader() -> (Endpoint, MemoryLookup) {
+    init_tracing();
+    let lookup = MemoryLookup::new();
+    let endpoint = bind_endpoint(Vec::new(), Some(lookup.clone())).await;
+    (endpoint, lookup)
+}
+
+/// The layer ranges of runners that received step 0, from a `FAKE_SHARD_LOG` (then removed).
+fn started_ranges(log: &Path) -> Vec<String> {
+    runner_starts(log)
+        .iter()
+        .filter_map(|line| line.split_whitespace().nth(1).map(str::to_owned))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_cut_follows_the_free_memory_the_workers_report() {
+    let (model, hash) = write_balanced_model();
+    let (leader, lookup) = bind_leader().await;
+    let runner = example_bin("fake_shard_runner");
+    let small = FullModelWorker::start(
+        &model,
+        &hash,
+        runner.clone(),
+        9 * BALANCED_LAYER_BYTES,
+        &leader,
+    )
+    .await;
+    let big =
+        FullModelWorker::start(&model, &hash, runner, 12 * BALANCED_LAYER_BYTES, &leader).await;
+    lookup.add_endpoint_info(direct_addr(&small.endpoint));
+    lookup.add_endpoint_info(direct_addr(&big.endpoint));
+    let log = temp_path("balanced.log");
+    // The small worker is listed first, but the one with the most free memory serves.
+    let manifest = balanced_manifest(&model, &hash, &[&small.endpoint, &big.endpoint], &log);
+    let frontend = Frontend::start_on(manifest, leader).await;
+
+    assert_completion(&frontend.chat_ok().await);
+    let cut = expected_cut(12 * BALANCED_LAYER_BYTES);
+    assert_eq!(cut, 9, "12 KB against 8 KB splits 16 layers 9 / 7");
+    assert_eq!(started_ranges(&log), [format!("{cut}:{BALANCED_LAYERS}")]);
+
+    // Every prompt plans afresh: with the big worker gone, the small one takes its share.
+    big.stop().await;
+    assert_completion(&frontend.chat_ok().await);
+    let small_cut = expected_cut(9 * BALANCED_LAYER_BYTES);
+    assert!(small_cut < cut, "{small_cut} vs {cut}");
+    assert_eq!(
+        started_ranges(&log),
+        [format!("{small_cut}:{BALANCED_LAYERS}")]
+    );
+
+    frontend.stop().await;
+    small.stop().await;
+    std::fs::remove_file(&model).expect("remove model");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_retry_replans_without_the_worker_that_failed() {
+    let (model, hash) = write_balanced_model();
+    let (leader, lookup) = bind_leader().await;
+    // The big worker's runner disappears after startup, so its sessions fail to start
+    // although its probes keep answering.
+    let doomed_runner = temp_path(&format!("runner{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example_bin("fake_shard_runner"), &doomed_runner).expect("copy runner");
+    let big = FullModelWorker::start(
+        &model,
+        &hash,
+        doomed_runner.clone(),
+        12 * BALANCED_LAYER_BYTES,
+        &leader,
+    )
+    .await;
+    let steady = FullModelWorker::start(
+        &model,
+        &hash,
+        example_bin("fake_shard_runner"),
+        10 * BALANCED_LAYER_BYTES,
+        &leader,
+    )
+    .await;
+    lookup.add_endpoint_info(direct_addr(&big.endpoint));
+    lookup.add_endpoint_info(direct_addr(&steady.endpoint));
+    let log = temp_path("balanced-retry.log");
+    let manifest = balanced_manifest(&model, &hash, &[&big.endpoint, &steady.endpoint], &log);
+    let frontend = Frontend::start_on(manifest, leader).await;
+    // A worker answers probes only once it has hashed its runner, which can then go.
+    let probe = probe_remote(&frontend.endpoint, big.endpoint.id(), TEST_TIMEOUT)
+        .await
+        .expect("the big worker answers a probe");
+    probe.discard();
+    std::fs::remove_file(&doomed_runner).expect("remove the big worker's runner");
+
+    let (status, body) = frontend.chat(true, "hi").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(streamed_text(&body), fixture_reply(), "{body}");
+    // The first attempt planned around the big worker and never got going; the retry
+    // planned again with the steady worker's memory.
+    let steady_cut = expected_cut(10 * BALANCED_LAYER_BYTES);
+    assert_ne!(steady_cut, expected_cut(12 * BALANCED_LAYER_BYTES));
+    assert_eq!(
+        started_ranges(&log),
+        [format!("{steady_cut}:{BALANCED_LAYERS}")]
+    );
+
+    frontend.stop().await;
+    big.stop().await;
+    steady.stop().await;
+    std::fs::remove_file(&model).expect("remove model");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn balancing_runs_everything_locally_when_no_worker_answers() {
+    let (model, hash) = write_balanced_model();
+    let (leader, _lookup) = bind_leader().await;
+    let log = temp_path("balanced-local.log");
+    let mut manifest = balanced_manifest(&model, &hash, &[], &log);
+    let unreachable: iroh::EndpointId = unreachable_worker_id().parse().expect("endpoint id");
+    let balance = manifest.balance.as_mut().expect("balanced");
+    balance.candidates.push(unreachable);
+    balance.local.offer_bytes = Some(u64::from(BALANCED_LAYERS) * BALANCED_LAYER_BYTES);
+    let frontend = Frontend::start_on(manifest, leader).await;
+    assert_completion(&frontend.chat_ok().await);
+    assert_eq!(started_ranges(&log), [format!("0:{BALANCED_LAYERS}")]);
+    frontend.stop().await;
+    std::fs::remove_file(&model).expect("remove model");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_plan_that_cannot_fit_is_refused_without_retrying() {
+    let (model, hash) = write_balanced_model();
+    let (leader, _lookup) = bind_leader().await;
+    let log = temp_path("balanced-full.log");
+    let manifest = balanced_manifest(&model, &hash, &[], &log);
+    let frontend = Frontend::start_on(manifest, leader).await;
+    let message = frontend.chat_error(false).await;
+    assert!(
+        message.contains("not enough memory for 16 layers"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("attempts"),
+        "a plan that cannot fit is not retried: {message}"
+    );
+    frontend.stop().await;
+    std::fs::remove_file(&model).expect("remove model");
+}
+
+#[tokio::test]
+async fn a_balanced_leader_refuses_a_full_model_that_is_not_the_manifest_model() {
+    let (model, _hash) = write_balanced_model();
+    let log = temp_path("balanced-wrong.log");
+    let manifest = balanced_manifest(&model, OTHER_SHA, &[], &log);
+    let endpoint = bind_endpoint(Vec::new(), None).await;
+    let config = FrontendConfig {
+        listen: free_loopback_addr(),
+        manifest,
+        endpoint: endpoint.clone(),
+        ring: None,
+    };
+    let result = timeout(TEST_TIMEOUT, serve_frontend(config, std::future::pending()))
+        .await
+        .expect("startup check finishes");
+    let error = format!(
+        "{:#}",
+        result.expect_err("a different model must be refused")
+    );
+    assert!(error.contains("balance.local.model"), "{error}");
+    endpoint.close().await;
+    std::fs::remove_file(&model).expect("remove model");
 }

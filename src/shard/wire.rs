@@ -6,6 +6,19 @@
 //! reply is one JSON line ([`StepReply`]) followed by `n_floats` little-endian `f32` values.
 //! A remote client first sends [`CLIENT_PREFACE`]; a local stdio runner gets no preface.
 //!
+//! Balanced manifests (M-28) add a second, backward-compatible handshake on the same RPC bridge
+//! ALPN: the client sends [`REQUEST_PREFACE`] followed by one JSON [`SessionRequest`] line.
+//!
+//! - `{"type":"probe"}`: the worker answers one JSON [`ProbeReply`] line (its free memory, model
+//!   identity, layer count and range mode) and finishes the stream. No runner starts.
+//! - `{"type":"session","begin":B,"end":E}`: the worker starts a runner for layers `[B, E)` and
+//!   the session continues exactly like a [`CLIENT_PREFACE`] one (metadata line, then requests
+//!   and replies). A worker that holds the full model accepts any range within its layer count;
+//!   one started with a fixed range accepts only that range.
+//!
+//! A worker that predates this handshake treats [`REQUEST_PREFACE`] as a bad preface and resets
+//! the stream, which a leader sees as a failed probe; [`CLIENT_PREFACE`] sessions are unchanged.
+//!
 //! Both sides live here: the coordinator uses the client half (`write_request` / `read_step`),
 //! and relays or fake runners use the server half (`read_request_header` / `write_step`).
 //! Every length read off the wire is checked against a fixed bound before anything is
@@ -21,6 +34,12 @@ use tokio::io::{
 
 /// Bytes a remote client sends before anything else; the endpoint stays silent until then.
 pub const CLIENT_PREFACE: &[u8; 5] = b"MSH1\n";
+
+/// Bytes a remote client sends before a [`SessionRequest`] line (a probe or a ranged session).
+pub const REQUEST_PREFACE: &[u8; 5] = b"MSH2\n";
+
+/// Bound on a [`SessionRequest`] line, newline excluded; real requests are a few dozen bytes.
+pub const MAX_REQUEST_LINE_BYTES: usize = 4 * 1024;
 
 /// First word of every request header (`"MSH1"` read as a big-endian `u32`).
 pub const REQUEST_MAGIC: u32 = 0x4d53_4831;
@@ -225,6 +244,104 @@ pub struct StepOutput {
     pub reply: StepReply,
     /// Exactly `reply.n_floats` values.
     pub floats: Vec<f32>,
+}
+
+/// Which handshake a remote client opened its stream with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preface {
+    /// [`CLIENT_PREFACE`]: a session over the worker's configured range.
+    Session,
+    /// [`REQUEST_PREFACE`]: a [`SessionRequest`] line follows.
+    Request,
+}
+
+/// What a client asks of a worker after [`REQUEST_PREFACE`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionRequest {
+    /// Report free memory and model identity, then end the stream.
+    Probe,
+    /// Start a runner for layers `[begin, end)` and run one session on it.
+    Session {
+        /// First layer (inclusive).
+        begin: u32,
+        /// End of the range (exclusive).
+        end: u32,
+    },
+}
+
+/// A worker's answer to [`SessionRequest::Probe`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProbeReply {
+    /// Memory the worker can offer right now, in bytes: the operating system's available
+    /// memory (never its total), capped by the worker's configured offer. 0 when unknown.
+    pub available_bytes: u64,
+    /// Identity of the model the worker serves (the original model's SHA-256).
+    pub model_sha256: String,
+    /// Layers in the model when the worker holds the full model and serves any range; `None`
+    /// for a worker that serves only its fixed range.
+    #[serde(default)]
+    pub layers: Option<u32>,
+    /// The worker's fixed range, or the default range of a full-model worker (used for
+    /// [`CLIENT_PREFACE`] sessions).
+    pub begin: u32,
+    /// End of that range (exclusive).
+    pub end: u32,
+    /// Every other field, kept so newer workers can add some.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+/// Client: send [`REQUEST_PREFACE`] and one [`SessionRequest`] line, then flush.
+pub async fn write_session_request<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    request: &SessionRequest,
+) -> anyhow::Result<()> {
+    let mut frame = REQUEST_PREFACE.to_vec();
+    frame.extend(json_line(request).context("failed to encode shard session request")?);
+    w.write_all(&frame)
+        .await
+        .context("failed to send shard session request")?;
+    w.flush()
+        .await
+        .context("failed to flush shard session request")
+}
+
+/// Server: read the [`SessionRequest`] line that follows [`REQUEST_PREFACE`].
+pub async fn read_session_request<R: AsyncBufRead + Unpin>(
+    r: &mut R,
+) -> anyhow::Result<SessionRequest> {
+    read_bounded_json_line(r, "shard session request", MAX_REQUEST_LINE_BYTES).await
+}
+
+/// Server: send a [`ProbeReply`] line and flush it.
+pub async fn write_probe_reply<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    reply: &ProbeReply,
+) -> anyhow::Result<()> {
+    let line = json_line(reply).context("failed to encode shard probe reply")?;
+    w.write_all(&line)
+        .await
+        .context("failed to send shard probe reply")?;
+    w.flush().await.context("failed to flush shard probe reply")
+}
+
+/// Client: read a worker's [`ProbeReply`] line.
+pub async fn read_probe_reply<R: AsyncBufRead + Unpin>(r: &mut R) -> anyhow::Result<ProbeReply> {
+    read_json_line(r, "shard probe reply").await
+}
+
+/// Server: read either preface, refusing anything else.
+pub async fn read_any_preface<R: AsyncRead + Unpin>(r: &mut R) -> anyhow::Result<Preface> {
+    let mut preface = [0u8; CLIENT_PREFACE.len()];
+    r.read_exact(&mut preface)
+        .await
+        .context("missing shard client preface")?;
+    match &preface {
+        CLIENT_PREFACE => Ok(Preface::Session),
+        REQUEST_PREFACE => Ok(Preface::Request),
+        _ => bail!("invalid shard client preface"),
+    }
 }
 
 /// Client: send [`CLIENT_PREFACE`] to a remote endpoint.
@@ -465,16 +582,25 @@ where
     R: AsyncBufRead + Unpin,
     T: DeserializeOwned,
 {
+    read_bounded_json_line(r, what, MAX_LINE_BYTES).await
+}
+
+/// Reads one newline-terminated JSON line of at most `max_bytes` and decodes it.
+async fn read_bounded_json_line<R, T>(r: &mut R, what: &str, max_bytes: usize) -> anyhow::Result<T>
+where
+    R: AsyncBufRead + Unpin,
+    T: DeserializeOwned,
+{
     let mut line = Vec::new();
-    let limit = MAX_LINE_BYTES as u64 + 1; // the content plus its newline
+    let limit = max_bytes as u64 + 1; // the content plus its newline
     (&mut *r)
         .take(limit)
         .read_until(b'\n', &mut line)
         .await
         .with_context(|| format!("failed to read {what} line"))?;
     if line.last() != Some(&b'\n') {
-        if line.len() > MAX_LINE_BYTES {
-            bail!("{what} line exceeds {MAX_LINE_BYTES} bytes");
+        if line.len() > max_bytes {
+            bail!("{what} line exceeds {max_bytes} bytes");
         }
         let place = if line.is_empty() {
             "before"
@@ -734,6 +860,89 @@ mod tests {
         assert_eq!(&hex[..6], "000102");
         assert_eq!(decode_hex(&hex).unwrap(), bytes);
         assert_eq!(decode_hex("ABcd").unwrap(), vec![0xab, 0xcd]);
+    }
+
+    #[tokio::test]
+    async fn session_requests_have_golden_bytes_and_round_trip() {
+        let mut bytes = Vec::new();
+        write_session_request(&mut bytes, &SessionRequest::Probe)
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"MSH2\n{\"type\":\"probe\"}\n");
+        let mut reader = bytes.as_slice();
+        assert_eq!(
+            read_any_preface(&mut reader).await.unwrap(),
+            Preface::Request
+        );
+        let mut reader = BufReader::new(reader);
+        assert_eq!(
+            read_session_request(&mut reader).await.unwrap(),
+            SessionRequest::Probe
+        );
+
+        let ranged = SessionRequest::Session { begin: 3, end: 9 };
+        let mut bytes = Vec::new();
+        write_session_request(&mut bytes, &ranged).await.unwrap();
+        assert_eq!(
+            bytes,
+            b"MSH2\n{\"type\":\"session\",\"begin\":3,\"end\":9}\n"
+        );
+        let mut reader = BufReader::new(&bytes[REQUEST_PREFACE.len()..]);
+        assert_eq!(read_session_request(&mut reader).await.unwrap(), ranged);
+    }
+
+    #[tokio::test]
+    async fn either_preface_is_recognised_and_garbage_is_refused() {
+        assert_eq!(
+            read_any_preface(&mut &CLIENT_PREFACE[..]).await.unwrap(),
+            Preface::Session
+        );
+        assert!(read_any_preface(&mut &b"MSH3\n"[..]).await.is_err());
+        assert!(read_any_preface(&mut &b"MS"[..]).await.is_err());
+        // An old worker only knows the original preface, so it refuses the new one.
+        assert!(read_preface(&mut &REQUEST_PREFACE[..]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn malformed_session_requests_are_refused() {
+        for line in [
+            &b"{\"type\":\"session\",\"begin\":1}\n"[..],
+            b"{\"type\":\"reset\"}\n",
+            b"{\"type\":\"session\",\"begin\":1,\"end\":2,\"x\":0}\n",
+            b"{\"type\":\"probe\"}",
+        ] {
+            let mut reader = BufReader::new(line);
+            assert!(read_session_request(&mut reader).await.is_err(), "{line:?}");
+        }
+        let mut long = vec![b' '; MAX_REQUEST_LINE_BYTES + 1];
+        long.push(b'\n');
+        let error = read_session_request(&mut long.as_slice())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("exceeds"), "{error:#}");
+    }
+
+    #[tokio::test]
+    async fn probe_replies_round_trip_and_keep_unknown_fields() {
+        let reply = ProbeReply {
+            available_bytes: 8_000_000_000,
+            model_sha256: "ab".repeat(32),
+            layers: Some(64),
+            begin: 0,
+            end: 64,
+            extra: Map::new(),
+        };
+        let mut bytes = Vec::new();
+        write_probe_reply(&mut bytes, &reply).await.unwrap();
+        assert_eq!(
+            read_probe_reply(&mut bytes.as_slice()).await.unwrap(),
+            reply
+        );
+
+        let fixed = b"{\"available_bytes\":5,\"model_sha256\":\"x\",\"begin\":0,\"end\":32,\"gpu\":\"m1\"}\n";
+        let parsed = read_probe_reply(&mut &fixed[..]).await.unwrap();
+        assert_eq!((parsed.layers, parsed.begin, parsed.end), (None, 0, 32));
+        assert_eq!(parsed.extra["gpu"], "m1");
     }
 
     #[tokio::test]

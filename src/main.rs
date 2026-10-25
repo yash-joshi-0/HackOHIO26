@@ -20,7 +20,7 @@ use llm_cluster::node::PeerTable;
 use llm_cluster::protocol::{CONTROL_ALPN, RPC_BRIDGE_ALPN};
 use llm_cluster::shard::ring::{RING_ALPN, RingWorkerConfig, serve_ring_worker};
 use llm_cluster::shard::ring_origin::RingSettings;
-use llm_cluster::shard::serve::{ShardServeConfig, serve_shard};
+use llm_cluster::shard::serve::{ShardServeConfig, ShardServeOptions, serve_shard_with};
 use llm_cluster::worker::{self, WorkerConfig};
 use llm_cluster::{api, rpc_bridge};
 use serde::Serialize;
@@ -188,9 +188,17 @@ enum Command {
         /// The model (or exported shard) file passed to the runner.
         #[arg(long)]
         model: PathBuf,
-        /// Half-open layer range served, as `BEGIN:END` (e.g. `0:32`).
-        #[arg(long, value_parser = parse_layer_range)]
-        range: LayerRange,
+        /// Half-open layer range served, as `BEGIN:END` (e.g. `0:32`). With `--layers` it is
+        /// only the default for leaders that ask for no range, and defaults to the whole model.
+        #[arg(long, value_parser = parse_layer_range, required_unless_present = "layers")]
+        range: Option<LayerRange>,
+        /// Layers in the model when `--model` is the full model: leaders may then ask for any
+        /// range per session (balanced manifests).
+        #[arg(long)]
+        layers: Option<u32>,
+        /// Most memory, in bytes, reported as free to balancing leaders.
+        #[arg(long)]
+        offer_bytes: Option<u64>,
         /// Context window passed to the runner.
         #[arg(long)]
         context: u32,
@@ -614,6 +622,8 @@ async fn main() -> anyhow::Result<()> {
             runner,
             model,
             range,
+            layers,
+            offer_bytes,
             context,
             gpu_layers,
             budget_bytes,
@@ -622,6 +632,7 @@ async fn main() -> anyhow::Result<()> {
             ref allow_peers,
             profiles,
         } => {
+            let range = served_range(range, layers)?;
             let config = ShardServeConfig {
                 runner,
                 model,
@@ -633,7 +644,12 @@ async fn main() -> anyhow::Result<()> {
                 expected_sha256,
                 source_sha256,
             };
-            shard_serve(&cli.key, config, &parse_node_ids(allow_peers)?, profiles).await
+            let options = ShardServeOptions {
+                layers,
+                offer_bytes,
+            };
+            let allowed = parse_node_ids(allow_peers)?;
+            shard_serve(&cli.key, config, options, &allowed, profiles).await
         }
         Command::ShardRingWorker {
             runner,
@@ -787,6 +803,7 @@ async fn bridge_serve(
 async fn shard_serve(
     key: &Path,
     config: ShardServeConfig,
+    options: ShardServeOptions,
     allow_peers: &[iroh::EndpointId],
     profiles: WorkerProfileArgs,
 ) -> anyhow::Result<()> {
@@ -794,7 +811,7 @@ async fn shard_serve(
     let control = profiles.bind().await?;
     let endpoint = network::bind_endpoint(key, vec![RPC_BRIDGE_ALPN.to_vec()]).await?;
     print_node_id(&endpoint);
-    let serve = serve_shard(endpoint.clone(), config, allowed);
+    let serve = serve_shard_with(endpoint.clone(), config, options, allowed);
     run_worker_until_ctrl_c(&endpoint, serve, control).await
 }
 
@@ -849,6 +866,19 @@ fn read_ring_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result
 struct LayerRange {
     begin: u32,
     end: u32,
+}
+
+/// The range `shard-serve` serves by default: `--range`, or the whole model with `--layers`.
+fn served_range(range: Option<LayerRange>, layers: Option<u32>) -> anyhow::Result<LayerRange> {
+    match (range, layers) {
+        (Some(range), _) => Ok(range),
+        (None, Some(layers)) if layers > 0 => Ok(LayerRange {
+            begin: 0,
+            end: layers,
+        }),
+        (None, Some(_)) => anyhow::bail!("--layers must be at least 1"),
+        (None, None) => anyhow::bail!("shard-serve needs --range or --layers"),
+    }
 }
 
 /// Parses `--range BEGIN:END`, refusing an empty or reversed range.
@@ -1401,7 +1431,7 @@ mod tests {
             panic!("expected shard-serve, got {command:?}");
         };
         assert_eq!(runner, PathBuf::from("shard_runner"));
-        assert_eq!(range, LayerRange { begin: 0, end: 32 });
+        assert_eq!(range, Some(LayerRange { begin: 0, end: 32 }));
         assert_eq!((context, gpu_layers, budget_bytes), (512, 0, 1_048_576));
         assert_eq!(expected_sha256, "abc123");
         assert_eq!(source_sha256, None);
@@ -1432,6 +1462,51 @@ mod tests {
         };
         assert_eq!(gpu_layers, 99);
         assert_eq!(source_sha256.as_deref(), Some("def456"));
+    }
+
+    #[test]
+    fn shard_serve_full_model_mode_needs_no_range() {
+        let parse = |args: &[&str]| {
+            let base = [
+                "meshthing",
+                "shard-serve",
+                "--runner",
+                "shard_runner",
+                "--model",
+                "full.gguf",
+                "--context",
+                "512",
+                "--budget-bytes",
+                "1048576",
+                "--expected-sha256",
+                "abc123",
+                "--allow-peer",
+                "a",
+            ];
+            Cli::try_parse_from(base.iter().chain(args)).map(|cli| cli.command)
+        };
+        assert!(parse(&[]).is_err(), "--range or --layers is required");
+        let command = parse(&["--layers", "64", "--offer-bytes", "8000000000"]).expect("parse");
+        let Command::ShardServe {
+            range,
+            layers,
+            offer_bytes,
+            ..
+        } = command
+        else {
+            panic!("expected shard-serve, got {command:?}");
+        };
+        assert_eq!(
+            (range, layers, offer_bytes),
+            (None, Some(64), Some(8_000_000_000))
+        );
+        assert_eq!(
+            served_range(range, layers).unwrap(),
+            LayerRange { begin: 0, end: 64 }
+        );
+        let fixed = LayerRange { begin: 0, end: 32 };
+        assert_eq!(served_range(Some(fixed), Some(64)).unwrap(), fixed);
+        assert!(served_range(None, Some(0)).is_err());
     }
 
     #[test]

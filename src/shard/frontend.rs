@@ -25,7 +25,16 @@
 //! sends an SSE `error` event and ends without `[DONE]`, which makes the job API fail the job
 //! without committing history. A client that disconnects cancels its generation at once, with
 //! no retry, which kills the local runners and closes the remote streams.
+//!
+//! With a balanced manifest (`balance`, M-28) every attempt, the first and each retry, starts
+//! by choosing the layer ranges afresh: it probes every candidate worker's free memory (a
+//! worker whose probe fails is skipped for that attempt and counts as failed), measures the
+//! leader's own, and splits the layers with [`plan_layers`]. In v1 the remote candidate with
+//! the most free memory among those that have failed least recently serves the prefix, and
+//! the plan sets the cut; the leader always runs the final layers. Stages then open with the
+//! chosen ranges and their metadata is checked against them.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
@@ -41,7 +50,7 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures_util::future::try_join_all;
+use futures_util::future::{join_all, try_join_all};
 use futures_util::{StreamExt, stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -55,15 +64,18 @@ use tracing::{info, warn};
 use iroh::EndpointId;
 
 use crate::api::CHAT_COMPLETIONS_PATH;
-use crate::shard::manifest::{ShardManifest, StageLocation, StageSpec};
+use crate::shard::balance::{BalanceInput, LayerAssignment, NodeMemory, plan_layers};
+use crate::shard::manifest::{BalanceSpec, ShardManifest, StageLocation, StageSpec};
 use crate::shard::manifest::{same_sha256, sha256_file};
 use crate::shard::pipeline::{
     FailureClass, FinishReason, Generation, GenerationCancelled, GenerationLimits, GenerationState,
-    LocalLaunch, METADATA_TIMEOUT, Pipeline, PromptTooLong, StageExpectation, StageFault,
-    StageIdentity, StageLink, classify,
+    LocalLaunch, METADATA_TIMEOUT, PROBE_TIMEOUT, Pipeline, PromptTooLong, RemoteProbe,
+    StageExpectation, StageFault, StageIdentity, StageLink, classify, probe_remote,
 };
 use crate::shard::ring_origin::{RingLink, RingPlan, RingSettings};
+use crate::shard::serve::available_memory_bytes;
 use crate::shard::template::{ChatMessage, ChatRenderer};
+use crate::shard::wire::ProbeReply;
 
 /// Liveness probe, as llama-server serves it.
 pub const HEALTH_PATH: &str = "/health";
@@ -130,6 +142,7 @@ pub async fn serve_frontend(
     let ring = ring_runtime(&config.manifest, config.ring)?;
     let renderer = ChatRenderer::load(&config.manifest.chat_template)?;
     verify_artifacts(&config.manifest).await?;
+    verify_balanced_model(&config.manifest).await?;
     let state = Arc::new(FrontendState {
         expectations: stage_expectations(&config.manifest),
         manifest: config.manifest,
@@ -219,6 +232,27 @@ async fn verify_artifacts(manifest: &ShardManifest) -> anyhow::Result<()> {
         }
         info!(stage = %format!("{}..{}", stage.begin, stage.end), "verified artifact_sha256");
     }
+    Ok(())
+}
+
+/// In balanced mode, hashes the leader's full model file and checks it is the manifest's model,
+/// which is what establishes the identity of every local stage cut from it.
+async fn verify_balanced_model(manifest: &ShardManifest) -> anyhow::Result<()> {
+    let Some(balance) = &manifest.balance else {
+        return Ok(());
+    };
+    let path = balance.local.model.clone();
+    let actual = tokio::task::spawn_blocking(move || sha256_file(&path))
+        .await
+        .context("model hashing task failed")??;
+    if !same_sha256(&actual, &manifest.model_sha256) {
+        bail!(
+            "balance.local.model {} has SHA-256 {actual}, but model_sha256 is {}",
+            balance.local.model.display(),
+            manifest.model_sha256
+        );
+    }
+    info!("verified the balanced full model file");
     Ok(())
 }
 
@@ -668,7 +702,7 @@ async fn generate_pipeline(
         };
         warn!(
             attempt = budget.attempts(),
-            stage = ?fault.stage,
+            stage_index = ?fault.stage,
             worker = ?fault.worker.map(|worker| worker.fmt_short().to_string()),
             completion_tokens = progress.completion_tokens(),
             error = %format!("{:#}", fault.error),
@@ -753,6 +787,12 @@ impl FailedWorkers {
         self.latest.insert(worker, self.failures);
     }
 
+    /// The sequence number of `worker`'s latest failure, or `None` if it has not failed.
+    /// Lower sorts first: never failed, then least recently failed.
+    fn rank(&self, worker: &EndpointId) -> Option<u64> {
+        self.latest.get(worker).copied()
+    }
+
     /// `candidates` in the order to try them: those that have not failed keep their order
     /// (primary, then standbys), followed by failed ones, least recently failed first.
     fn order(&self, mut candidates: Vec<EndpointId>) -> Vec<EndpointId> {
@@ -827,13 +867,21 @@ impl AttemptContext<'_> {
         pipeline.resume_cancellable(progress, cancel).await
     }
 
-    /// Opens every stage of the pipeline manifest at once and validates them.
+    /// Opens every stage of the pipeline manifest at once (in balanced mode, with the ranges
+    /// planned for this attempt) and validates them.
     async fn open_pipeline(&self) -> anyhow::Result<Pipeline> {
-        let stages = &self.state.manifest.stages;
-        let opening = stages.iter().enumerate();
-        let links =
-            try_join_all(opening.map(|(index, stage)| self.open_link(index, stage))).await?;
-        Pipeline::new(links, &self.state.expectations)
+        let (links, expectations) = match &self.state.manifest.balance {
+            Some(balance) => self.open_balanced(balance).await?,
+            None => {
+                let stages = &self.state.manifest.stages;
+                let opening = stages.iter().enumerate();
+                let links =
+                    try_join_all(opening.map(|(index, stage)| self.open_link(index, stage)))
+                        .await?;
+                (links, self.state.expectations.clone())
+            }
+        };
+        Pipeline::new(links, &expectations)
     }
 
     /// Opens the link of stage `index`: a fresh local runner, or a remote candidate.
@@ -877,6 +925,278 @@ impl AttemptContext<'_> {
         };
         Err(error.context(fault))
     }
+}
+
+impl AttemptContext<'_> {
+    /// Balanced mode: probes the candidates, plans the ranges from free memory, and opens the
+    /// stages with those ranges. Returns the links with what each must report.
+    async fn open_balanced(
+        &self,
+        balance: &BalanceSpec,
+    ) -> anyhow::Result<(Vec<StageLink>, Vec<StageExpectation>)> {
+        let manifest = &self.state.manifest;
+        let probes = self.probe_candidates(balance).await;
+        let local_free = local_free_bytes(balance);
+        let (mut remote, others) = self.choose_remote(probes.eligible);
+        others.into_iter().for_each(RemoteProbe::discard);
+        let reply = remote.as_ref().map(|probe| &probe.reply);
+        let plan = match plan_balanced(manifest, balance, reply, local_free) {
+            Ok(plan) => plan,
+            Err(error) => {
+                if let Some(remote) = remote {
+                    remote.discard();
+                }
+                return Err(blame_unreached_worker(error, probes.last_failure));
+            }
+        };
+        log_plan(&plan, remote.as_ref(), local_free);
+        let final_index = plan.len() - 1;
+        // The remote may get no layers, leaving the leader to run the whole model.
+        if final_index == 0
+            && let Some(unused) = remote.take()
+        {
+            unused.discard();
+        }
+        let planned = plan.iter().enumerate().map(|(index, assignment)| {
+            let probe = if index < final_index {
+                remote.take()
+            } else {
+                None
+            };
+            self.open_planned(index, *assignment, probe)
+        });
+        let links = try_join_all(planned).await?;
+        Ok((links, balanced_expectations(manifest, &plan)))
+    }
+
+    /// Probes every candidate at once, in preference order. A worker that cannot be probed is
+    /// recorded as failed and skipped for this attempt; one that answers but cannot serve a
+    /// balanced range of this model is skipped with a warning.
+    async fn probe_candidates(&self, balance: &BalanceSpec) -> Probes {
+        let candidates = lock(self.failed).order(balance.candidates.clone());
+        let endpoint = &self.state.endpoint;
+        let probing = candidates
+            .iter()
+            .map(|&worker| probe_remote(endpoint, worker, PROBE_TIMEOUT));
+        let mut probes = Probes::default();
+        for (worker, result) in candidates.iter().copied().zip(join_all(probing).await) {
+            match result {
+                Ok(probe) => match eligibility(&probe.reply, &self.state.manifest) {
+                    Ok(()) => probes.eligible.push(probe),
+                    Err(reason) => {
+                        warn!(worker = %worker.fmt_short(), %reason, "skipping balance candidate");
+                        probe.discard();
+                    }
+                },
+                Err(error) => {
+                    warn!(
+                        worker = %worker.fmt_short(),
+                        error = %format!("{error:#}"),
+                        "balance candidate failed its probe; skipping it this attempt"
+                    );
+                    lock(self.failed).record(worker);
+                    probes.last_failure = Some((worker, error));
+                }
+            }
+        }
+        probes
+    }
+
+    /// The remote that serves the prefix in v1: among the workers that failed least recently
+    /// (never, ideally), the one with the most free memory; earlier candidates win ties.
+    /// Returns it and the probes not chosen.
+    fn choose_remote(&self, eligible: Vec<RemoteProbe>) -> (Option<RemoteProbe>, Vec<RemoteProbe>) {
+        let failed = lock(self.failed);
+        let best = eligible
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, probe)| {
+                let rank = failed.rank(&probe.worker);
+                (rank, Reverse(probe.reply.available_bytes), *index)
+            })
+            .map(|(index, _)| index);
+        drop(failed);
+        let mut others = eligible;
+        let chosen = best.map(|index| others.remove(index));
+        (chosen, others)
+    }
+
+    /// Opens stage `index` of a balanced plan: the probed remote, or a fresh local runner over
+    /// the full model.
+    async fn open_planned(
+        &self,
+        index: usize,
+        assignment: LayerAssignment,
+        probe: Option<RemoteProbe>,
+    ) -> anyhow::Result<StageLink> {
+        let LayerAssignment { begin, end, .. } = assignment;
+        if let Some(probe) = probe {
+            let worker = probe.worker;
+            return StageLink::open_probed(probe, begin, end, METADATA_TIMEOUT)
+                .await
+                .with_context(|| StageFault {
+                    stage: index,
+                    worker: Some(worker),
+                });
+        }
+        let manifest = &self.state.manifest;
+        let Some(balance) = &manifest.balance else {
+            bail!("a balanced stage needs a balanced manifest");
+        };
+        let local = &balance.local;
+        let launch = LocalLaunch {
+            runner: &manifest.runner,
+            model: &local.model,
+            begin,
+            end,
+            context: manifest.context,
+            gpu_layers: local.gpu_layers,
+            budget_bytes: local.budget_bytes,
+            prompt: self.prompt,
+            env: &local.env,
+        };
+        StageLink::spawn_local(&launch, METADATA_TIMEOUT)
+            .await
+            .with_context(|| StageFault {
+                stage: index,
+                worker: None,
+            })
+    }
+}
+
+/// What probing the candidates found.
+#[derive(Default)]
+struct Probes {
+    /// Workers that answered and can serve any range of this model, in preference order.
+    eligible: Vec<RemoteProbe>,
+    /// The last worker whose probe failed, and why.
+    last_failure: Option<(EndpointId, anyhow::Error)>,
+}
+
+/// Why a worker that answered a probe cannot take part, if it cannot.
+fn eligibility(reply: &ProbeReply, manifest: &ShardManifest) -> Result<(), String> {
+    if !same_sha256(&reply.model_sha256, &manifest.model_sha256) {
+        return Err(format!(
+            "it serves model {}, not {}",
+            reply.model_sha256, manifest.model_sha256
+        ));
+    }
+    match reply.layers {
+        Some(layers) if layers == manifest.layers => Ok(()),
+        Some(layers) => Err(format!(
+            "its model has {layers} layers, not {}",
+            manifest.layers
+        )),
+        None => Err(format!(
+            "it serves only layers {}:{} (start it with the full model and --layers)",
+            reply.begin, reply.end
+        )),
+    }
+}
+
+/// A plan that cannot fit is fatal, unless a candidate could not be probed this attempt:
+/// another attempt may reach that worker and fit after all, so the probe failure (retryable,
+/// blamed on that worker) carries the planning error.
+fn blame_unreached_worker(
+    error: anyhow::Error,
+    last_failure: Option<(EndpointId, anyhow::Error)>,
+) -> anyhow::Error {
+    match last_failure {
+        Some((worker, failure)) => failure.context(format!("{error:#}")).context(StageFault {
+            stage: 0,
+            worker: Some(worker),
+        }),
+        None => error,
+    }
+}
+
+/// What each stage of a balanced plan must report: its chosen range, the remote prefix proving
+/// its identity through the relay, the leader's final stage through its verified full model.
+fn balanced_expectations(
+    manifest: &ShardManifest,
+    plan: &[LayerAssignment],
+) -> Vec<StageExpectation> {
+    let final_index = plan.len().saturating_sub(1);
+    plan.iter()
+        .enumerate()
+        .map(|(index, assignment)| StageExpectation {
+            begin: assignment.begin,
+            end: assignment.end,
+            layers: manifest.layers,
+            model_sha256: manifest.model_sha256.clone(),
+            identity: if index < final_index {
+                StageIdentity::Remote
+            } else {
+                // The full model file was verified against model_sha256 at startup.
+                StageIdentity::Local {
+                    artifact_verified: true,
+                }
+            },
+        })
+        .collect()
+}
+
+/// The leader's own free memory, capped by its configured offer.
+fn local_free_bytes(balance: &BalanceSpec) -> u64 {
+    let measured = available_memory_bytes();
+    balance
+        .local
+        .offer_bytes
+        .map_or(measured, |offer| measured.min(offer))
+}
+
+/// Splits the layers between the chosen remote (if any) and the leader's final stage.
+fn plan_balanced(
+    manifest: &ShardManifest,
+    balance: &BalanceSpec,
+    remote: Option<&ProbeReply>,
+    local_free: u64,
+) -> anyhow::Result<Vec<LayerAssignment>> {
+    let reserve = balance.reserve_bytes;
+    let mut nodes: Vec<NodeMemory> = remote
+        .map(|reply| NodeMemory {
+            budget_bytes: reply.available_bytes.saturating_sub(reserve),
+            fixed_bytes: balance.stage_overhead_bytes,
+        })
+        .into_iter()
+        .collect();
+    nodes.push(NodeMemory {
+        budget_bytes: local_free.saturating_sub(reserve),
+        fixed_bytes: balance
+            .stage_overhead_bytes
+            .saturating_add(balance.output_bytes),
+    });
+    let layers = usize::try_from(manifest.layers).context("layer count overflows")?;
+    let layer_bytes = vec![balance.layer_cost(manifest.context); layers];
+    let input = BalanceInput {
+        nodes: &nodes,
+        layer_bytes: &layer_bytes,
+        first_stage_bytes: balance.embedding_bytes,
+    };
+    plan_layers(&input).with_context(|| {
+        format!(
+            "cannot balance {} layers (leader {local_free} bytes free{}, reserve {reserve})",
+            manifest.layers,
+            remote.map_or_else(String::new, |reply| format!(
+                ", remote {} bytes free",
+                reply.available_bytes
+            ))
+        )
+    })
+}
+
+fn log_plan(plan: &[LayerAssignment], remote: Option<&RemoteProbe>, local_free: u64) {
+    let ranges: Vec<String> = plan
+        .iter()
+        .map(|assignment| format!("{}..{}", assignment.begin, assignment.end))
+        .collect();
+    info!(
+        ranges = %ranges.join(","),
+        remote = ?remote.map(|probe| probe.worker.fmt_short().to_string()),
+        remote_free = ?remote.map(|probe| probe.reply.available_bytes),
+        local_free,
+        "balanced layer plan"
+    );
 }
 
 /// Waits for the whole generation and answers with one completion object.

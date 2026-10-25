@@ -10,8 +10,10 @@ use iroh::endpoint::{Connection, ConnectionError, RecvStream, SendStream, preset
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode};
 use llm_cluster::protocol::RPC_BRIDGE_ALPN;
 use llm_cluster::rpc_bridge::{PEER_NOT_APPROVED, PEER_NOT_APPROVED_REASON, PeerAllowlist};
-use llm_cluster::shard::serve::{ShardServeConfig, serve_shard};
-use llm_cluster::shard::wire::{self, StageInput, StageMetadata};
+use llm_cluster::shard::serve::{
+    ShardServeConfig, ShardServeOptions, serve_shard, serve_shard_with,
+};
+use llm_cluster::shard::wire::{self, SessionRequest, StageInput, StageMetadata};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::task::JoinHandle;
@@ -34,6 +36,10 @@ const QUEUE_GRACE: Duration = Duration::from_millis(500);
 const PREFILL: [u32; 3] = [0, 105, 106];
 /// Decode tokens sent one step at a time after the prefill.
 const DECODE: [u32; 2] = [73, 102];
+/// Layers in the fixture model, which a full-model worker may hand out in any range.
+const FIXTURE_LAYERS: u32 = 4;
+/// Memory a full-model worker in these tests offers, far below any real machine's free memory.
+const OFFER_BYTES: u64 = 12_345;
 
 fn init_tracing() {
     // Another test in this binary may already have installed the subscriber; that is fine.
@@ -110,6 +116,14 @@ impl Worker {
         Self { endpoint, task }
     }
 
+    /// Serves the fixture with balanced-mode `options`.
+    fn serve_with(endpoint: Endpoint, approved: &[EndpointId], options: ShardServeOptions) -> Self {
+        let allowed = PeerAllowlist::new(approved.iter().copied()).expect("allowlist");
+        let config = config(sha256_hex(&model_fixture()));
+        let task = tokio::spawn(serve_shard_with(endpoint.clone(), config, options, allowed));
+        Self { endpoint, task }
+    }
+
     /// Connects `client` (bound with [`client_for`]) to this worker on the shard ALPN.
     async fn connect(&self, client: &Endpoint) -> Connection {
         let connect = client.connect(self.endpoint.id(), RPC_BRIDGE_ALPN);
@@ -160,6 +174,58 @@ async fn read_meta(recv: &mut BufReader<RecvStream>) -> StageMetadata {
         .expect("read metadata")
 }
 
+/// Opens a stream for a [`SessionRequest`] (probe or ranged session).
+async fn open_request(
+    connection: &Connection,
+    request: &SessionRequest,
+) -> (SendStream, BufReader<RecvStream>) {
+    let (mut send, recv) = connection.open_bi().await.expect("open shard stream");
+    wire::write_session_request(&mut send, request)
+        .await
+        .expect("send session request");
+    (send, BufReader::new(recv))
+}
+
+/// Opens a session for layers `[begin, end)`.
+async fn open_ranged_session(connection: &Connection, begin: u32, end: u32) -> Session {
+    let (send, mut recv) = open_request(connection, &SessionRequest::Session { begin, end }).await;
+    let meta = read_meta(&mut recv).await;
+    Session {
+        send,
+        recv,
+        meta,
+        step: 0,
+        position: 0,
+    }
+}
+
+/// Asks for a range the worker must refuse: the stream ends without metadata.
+async fn assert_range_refused(connection: &Connection, begin: u32, end: u32) {
+    let (_send, mut recv) = open_request(connection, &SessionRequest::Session { begin, end }).await;
+    let refused = timeout(TEST_TIMEOUT, wire::read_metadata(&mut recv))
+        .await
+        .expect("worker ends the refused session");
+    assert!(refused.is_err(), "layers {begin}:{end} must be refused");
+}
+
+async fn probe(connection: &Connection) -> wire::ProbeReply {
+    let (_send, mut recv) = open_request(connection, &SessionRequest::Probe).await;
+    let reply = timeout(TEST_TIMEOUT, wire::read_probe_reply(&mut recv))
+        .await
+        .expect("probe timed out")
+        .expect("probe reply");
+    let mut rest = Vec::new();
+    timeout(TEST_TIMEOUT, recv.read_to_end(&mut rest))
+        .await
+        .expect("worker finishes the probe stream")
+        .expect("clean end of probe stream");
+    assert!(
+        rest.is_empty(),
+        "unexpected bytes after the probe reply {rest:?}"
+    );
+    reply
+}
+
 async fn open_session(connection: &Connection) -> Session {
     let (send, mut recv) = open_stream(connection).await;
     let meta = read_meta(&mut recv).await;
@@ -173,9 +239,10 @@ async fn open_session(connection: &Connection) -> Session {
 }
 
 impl Session {
-    /// Sends one batch of tokens and checks the prefix stage's rows (`t + END` per token).
+    /// Sends one batch of tokens and checks the prefix stage's rows (`t + end` per token).
     async fn run_step(&mut self, tokens: &[u32]) {
         let embd = self.meta.embd as usize;
+        let end = self.meta.end;
         let input = StageInput::Tokens(tokens);
         wire::write_request(&mut self.send, self.step, self.position, &input)
             .await
@@ -191,7 +258,7 @@ impl Session {
         assert_eq!(output.reply.token, -1, "a prefix stage does not sample");
         let expected: Vec<f32> = tokens
             .iter()
-            .flat_map(|&token| std::iter::repeat_n((token + END) as f32, embd))
+            .flat_map(|&token| std::iter::repeat_n((token + end) as f32, embd))
             .collect();
         assert_eq!(output.floats, expected);
         self.step += 1;
@@ -351,4 +418,93 @@ async fn garbage_preface_ends_only_that_session() {
 
     client.close().await;
     worker.shut_down().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_full_model_worker_answers_probes_and_serves_any_requested_range() {
+    let endpoint = bind_worker().await;
+    let client = client_for(&endpoint).await;
+    let options = ShardServeOptions {
+        layers: Some(FIXTURE_LAYERS),
+        offer_bytes: Some(OFFER_BYTES),
+    };
+    let worker = Worker::serve_with(endpoint, &[client.id()], options);
+    let connection = worker.connect(&client).await;
+    let model_sha256 = sha256_hex(&model_fixture());
+
+    let reply = probe(&connection).await;
+    assert_eq!(reply.available_bytes, OFFER_BYTES, "capped by the offer");
+    assert_eq!(reply.model_sha256, model_sha256);
+    assert_eq!(reply.layers, Some(FIXTURE_LAYERS));
+    assert_eq!((reply.begin, reply.end), (BEGIN, END));
+
+    // Each session gets its own range from the same full model file.
+    for end in [3, 1] {
+        let mut session = open_ranged_session(&connection, 0, end).await;
+        assert_eq!((session.meta.begin, session.meta.end), (0, end));
+        assert_eq!(
+            session.meta.model_sha256.as_deref(),
+            Some(model_sha256.as_str())
+        );
+        session.drive().await;
+        session.close().await;
+    }
+    // A probe between sessions still works, and needs no runner.
+    assert_eq!(probe(&connection).await.layers, Some(FIXTURE_LAYERS));
+
+    assert_range_refused(&connection, 0, FIXTURE_LAYERS + 1).await;
+    assert_range_refused(&connection, 2, 2).await;
+    // The original preface still gets the configured range.
+    let mut legacy = open_session(&connection).await;
+    assert_stamped(&legacy.meta, &model_sha256);
+    legacy.drive().await;
+    legacy.close().await;
+
+    client.close().await;
+    worker.shut_down().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fixed_range_worker_refuses_other_ranges() {
+    let endpoint = bind_worker().await;
+    let client = client_for(&endpoint).await;
+    let worker = Worker::serve(endpoint, &[client.id()]);
+    let connection = worker.connect(&client).await;
+
+    let reply = probe(&connection).await;
+    assert_eq!(
+        reply.layers, None,
+        "a fixed-range worker cannot be balanced"
+    );
+    assert!(reply.available_bytes > 0, "free memory is measured");
+    assert_range_refused(&connection, 0, 3).await;
+    // Asking for exactly its range is fine.
+    let mut session = open_ranged_session(&connection, BEGIN, END).await;
+    assert_stamped(&session.meta, &sha256_hex(&model_fixture()));
+    session.drive().await;
+    session.close().await;
+
+    client.close().await;
+    worker.shut_down().await;
+}
+
+#[tokio::test]
+async fn a_full_model_worker_refuses_a_configured_range_past_the_model() {
+    let endpoint = bind_worker().await;
+    let allowed = PeerAllowlist::new([endpoint.id()]).expect("allowlist");
+    let mut config = config(sha256_hex(&model_fixture()));
+    config.end = FIXTURE_LAYERS + 1;
+    let options = ShardServeOptions {
+        layers: Some(FIXTURE_LAYERS),
+        offer_bytes: None,
+    };
+    let result = timeout(
+        TEST_TIMEOUT,
+        serve_shard_with(endpoint.clone(), config, options, allowed),
+    )
+    .await
+    .expect("startup check finishes");
+    let error = result.expect_err("a range past the model must be refused");
+    assert!(error.to_string().contains("does not fit"), "{error:#}");
+    endpoint.close().await;
 }

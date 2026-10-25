@@ -16,6 +16,10 @@
 //! first attempt is a resume with nothing generated. [`classify`] tells a caller whether an
 //! error is worth another attempt on fresh links and which stage or worker failed.
 //!
+//! For balanced manifests, [`probe_remote`] asks a full-model worker for its free memory before
+//! any range is chosen, and [`StageLink::open_probed`] then opens the session for the chosen
+//! range on the same connection.
+//!
 //! In EXPERIMENTAL ring execution ([`Pipeline::with_ring`]) the pipeline is the local stage 0,
 //! which tokenizes, followed by a [`RingLink`] that stands for every remote stage: stage 0's
 //! hidden rows go to the ring's entry worker and each step's token comes back from the terminal.
@@ -49,11 +53,15 @@ use crate::rpc_bridge::path_kind;
 use crate::shard::manifest::same_sha256;
 use crate::shard::ring_origin::{RingLink, check_origin_stage};
 use crate::shard::wire::{
-    self, MAX_BATCH_TOKENS, StageInput, StageMetadata, StepReply, StreamClosed,
+    self, MAX_BATCH_TOKENS, ProbeReply, SessionRequest, StageInput, StageMetadata, StepReply,
+    StreamClosed,
 };
 
 /// Bound on waiting for a stage's metadata line; loading a large model can take minutes.
 pub const METADATA_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Bound on dialling a worker and reading its probe reply.
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Bound on one stage answering one request (a full prefill batch on a slow CPU included).
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -168,20 +176,47 @@ impl StageLink {
         worker: EndpointId,
         metadata_timeout: Duration,
     ) -> anyhow::Result<Self> {
+        let connection = dial(endpoint, worker).await?;
+        Self::open_session(connection, worker, None, metadata_timeout).await
+    }
+
+    /// Opens a session for layers `[begin, end)` on the connection `probe` was answered on,
+    /// and reads the forwarded metadata within `metadata_timeout`. The worker must hold the
+    /// full model (or serve exactly that range).
+    pub async fn open_probed(
+        probe: RemoteProbe,
+        begin: u32,
+        end: u32,
+        metadata_timeout: Duration,
+    ) -> anyhow::Result<Self> {
+        let request = SessionRequest::Session { begin, end };
+        Self::open_session(
+            probe.connection,
+            probe.worker,
+            Some(request),
+            metadata_timeout,
+        )
+        .await
+    }
+
+    /// Opens a stream on `connection`, greets the worker with the original preface (`None`) or
+    /// a ranged session request, and reads the forwarded metadata.
+    async fn open_session(
+        connection: Connection,
+        worker: EndpointId,
+        request: Option<SessionRequest>,
+        metadata_timeout: Duration,
+    ) -> anyhow::Result<Self> {
         let label = format!("remote stage on {}", worker.fmt_short());
-        let connect_started = Instant::now();
-        let connection = endpoint
-            .connect(worker, RPC_BRIDGE_ALPN)
-            .await
-            .with_context(|| Unreachable(format!("failed to connect to {label}")))?;
-        debug!(stage = %label, path = path_kind(&connection), connect_us = connect_started.elapsed().as_micros(), "remote stage connected");
         let (mut send, recv) = connection
             .open_bi()
             .await
             .with_context(|| Unreachable(format!("failed to open a stream to {label}")))?;
-        wire::write_preface(&mut send)
-            .await
-            .with_context(|| format!("failed to greet {label}"))?;
+        match &request {
+            None => wire::write_preface(&mut send).await,
+            Some(request) => wire::write_session_request(&mut send, request).await,
+        }
+        .with_context(|| format!("failed to greet {label}"))?;
         let mut reader = BufReader::new(recv);
         let metadata_started = Instant::now();
         let metadata = read_metadata(&mut reader, &label, metadata_timeout).await?;
@@ -288,6 +323,64 @@ impl StageLink {
             }
         }
     }
+}
+
+/// A worker's answer to a probe, and the connection to open its session on.
+pub struct RemoteProbe {
+    /// The worker that answered.
+    pub worker: EndpointId,
+    /// What it reported.
+    pub reply: ProbeReply,
+    connection: Connection,
+}
+
+impl RemoteProbe {
+    /// Closes the connection of a probe whose worker was not chosen.
+    pub fn discard(self) {
+        self.connection
+            .close(CONNECTION_DONE, CONNECTION_DONE_REASON);
+    }
+}
+
+/// Dials `worker` and asks for its free memory and model identity, all within
+/// `probe_timeout`. Failures classify as retryable: the worker is unreachable, too old to know
+/// probes (it resets the stream), or slow.
+pub async fn probe_remote(
+    endpoint: &Endpoint,
+    worker: EndpointId,
+    probe_timeout: Duration,
+) -> anyhow::Result<RemoteProbe> {
+    let label = format!("worker {}", worker.fmt_short());
+    let probe = async {
+        let connection = dial(endpoint, worker).await?;
+        let (mut send, recv) = connection
+            .open_bi()
+            .await
+            .with_context(|| Unreachable(format!("failed to open a stream to {label}")))?;
+        wire::write_session_request(&mut send, &SessionRequest::Probe).await?;
+        let reply = wire::read_probe_reply(&mut BufReader::new(recv)).await?;
+        anyhow::Ok(RemoteProbe {
+            worker,
+            reply,
+            connection,
+        })
+    };
+    timeout(probe_timeout, probe)
+        .await
+        .with_context(|| format!("{label} did not answer a probe within {probe_timeout:?}"))?
+        .with_context(|| format!("failed to probe {label}"))
+}
+
+/// Dials `worker` on the RPC bridge ALPN.
+async fn dial(endpoint: &Endpoint, worker: EndpointId) -> anyhow::Result<Connection> {
+    let label = format!("remote stage on {}", worker.fmt_short());
+    let connect_started = Instant::now();
+    let connection = endpoint
+        .connect(worker, RPC_BRIDGE_ALPN)
+        .await
+        .with_context(|| Unreachable(format!("failed to connect to {label}")))?;
+    debug!(stage = %label, path = path_kind(&connection), connect_us = connect_started.elapsed().as_micros(), "remote stage connected");
+    Ok(connection)
 }
 
 /// How the stage a link serves is expected to look.

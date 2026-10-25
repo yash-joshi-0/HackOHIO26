@@ -35,6 +35,13 @@
 //!   tokenizes, then one or more remote ring workers covering `k..layers` in order. The last
 //!   remote stage is the terminal, which returns tokens straight to the leader. Ring execution
 //!   fails the job on any error, so its stages may not list `standby` workers.
+//!
+//! Instead of `stages`, a pipeline manifest may carry a `balance` section ([`BalanceSpec`],
+//! M-28): the candidate workers (each running `shard-serve` with the full model) and the
+//! leader's own full-model file. The front end then picks the ranges afresh at every prompt
+//! start and every retry, weighting each node by its free memory; see
+//! `docs/layer-balancing.md`. A manifest has exactly one of `stages` and `balance`, and ring
+//! execution does not support `balance`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -70,6 +77,12 @@ const CHATML: &str = "chatml";
 const RING_ALTERNATIVE: &str =
     "set \"execution\": \"ring\" for experimental ring forwarding (M-27)";
 
+/// Memory kept free on every node by default in balanced mode, on top of what the plan uses.
+pub const DEFAULT_RESERVE_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Default per-stage overhead in balanced mode: runner scratch and compute buffers.
+pub const DEFAULT_STAGE_OVERHEAD_BYTES: u64 = 256 * 1024 * 1024;
+
 /// A sharded model: the runner binary, the model's identity, and its stages in layer order.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,8 +105,78 @@ pub struct ShardManifest {
     /// How the stages are driven; `pipeline` when absent.
     #[serde(default)]
     pub execution: Execution,
-    /// Stages in layer order, covering `0..layers` without gaps or overlap.
+    /// Stages in layer order, covering `0..layers` without gaps or overlap. Empty (and
+    /// omitted) when `balance` is set.
+    #[serde(default)]
     pub stages: Vec<StageSpec>,
+    /// Opt-in balanced mode: ranges are chosen per prompt from the nodes' free memory. Boxed
+    /// so a fixed-stage manifest stays small.
+    #[serde(default)]
+    pub balance: Option<Box<BalanceSpec>>,
+}
+
+/// Balanced mode (M-28): who may serve layers and what each layer and stage costs in memory.
+///
+/// At every prompt start (and every retry) the front end probes each candidate's free memory,
+/// measures its own, and splits the layers with [`crate::shard::balance::plan_layers`]. In v1
+/// at most one remote candidate takes part (the remote prefix; chained remote stages need
+/// M-27), so the plan chooses that candidate and the cut point.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BalanceSpec {
+    /// Workers that may serve the remote prefix, in preference order. Each runs `shard-serve`
+    /// with the full model and `--layers`, and allowlists the leader. May be empty, in which
+    /// case the leader runs every layer itself.
+    #[serde(default)]
+    pub candidates: Vec<EndpointId>,
+    /// The leader's own final stage, which always runs the last layers.
+    pub local: BalancedLocal,
+    /// Weight bytes of one decoder layer.
+    pub layer_bytes: u64,
+    /// KV cache bytes one layer needs per token of context.
+    #[serde(default)]
+    pub kv_bytes_per_token: u64,
+    /// Fixed bytes every stage needs whatever its range (runner scratch, compute buffers).
+    #[serde(default = "default_stage_overhead_bytes")]
+    pub stage_overhead_bytes: u64,
+    /// Token embedding bytes, loaded by whichever stage owns layer 0.
+    #[serde(default)]
+    pub embedding_bytes: u64,
+    /// Output norm and head bytes, loaded by the final stage (the embedding again when the
+    /// model ties them).
+    #[serde(default)]
+    pub output_bytes: u64,
+    /// Memory left free on every node, subtracted from what it reports.
+    #[serde(default = "default_reserve_bytes")]
+    pub reserve_bytes: u64,
+}
+
+impl BalanceSpec {
+    /// Memory one layer costs with a context of `context` tokens: weights plus KV cache.
+    pub fn layer_cost(&self, context: u32) -> u64 {
+        self.layer_bytes
+            .saturating_add(self.kv_bytes_per_token.saturating_mul(u64::from(context)))
+    }
+}
+
+/// The leader's final stage in balanced mode: a runner over the full model file.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BalancedLocal {
+    /// The full model file. The front end hashes it once at startup and requires it to equal
+    /// `model_sha256`.
+    pub model: PathBuf,
+    /// Layers the runner offloads to the GPU.
+    #[serde(default)]
+    pub gpu_layers: u32,
+    /// Runtime buffer budget passed to the runner; must be positive.
+    pub budget_bytes: u64,
+    /// Most memory the leader offers its own stage, whatever the operating system reports.
+    #[serde(default)]
+    pub offer_bytes: Option<u64>,
+    /// Extra environment variables for the runner process.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 /// How the leader drives a manifest's stages.
@@ -299,6 +382,14 @@ fn default_max_tokens() -> u32 {
     DEFAULT_MAX_TOKENS
 }
 
+fn default_reserve_bytes() -> u64 {
+    DEFAULT_RESERVE_BYTES
+}
+
+fn default_stage_overhead_bytes() -> u64 {
+    DEFAULT_STAGE_OVERHEAD_BYTES
+}
+
 impl StageSpec {
     /// Whether the stage runs in a local runner process.
     pub fn is_local(&self) -> bool {
@@ -341,6 +432,18 @@ impl ShardManifest {
     /// Checks the structural rules and the topology of the execution mode; see the module docs.
     pub fn validate(&self) -> anyhow::Result<()> {
         self.validate_limits()?;
+        if let Some(balance) = &self.balance {
+            ensure!(
+                !self.is_ring(),
+                "ring execution does not support \"balance\": a failed ring job fails rather \
+                 than re-planning; use \"execution\": \"pipeline\" for layer balancing"
+            );
+            ensure!(
+                self.stages.is_empty(),
+                "a manifest has either \"stages\" or \"balance\", not both"
+            );
+            return self.validate_balance(balance);
+        }
         self.validate_coverage()?;
         self.validate_stages()?;
         match self.execution {
@@ -355,12 +458,41 @@ impl ShardManifest {
     }
 
     /// Every remote worker the front end may dial, in stage order: each remote stage's
-    /// primary followed by its standbys.
+    /// primary followed by its standbys, or the balanced candidates.
     pub fn remote_workers(&self) -> Vec<EndpointId> {
+        let balanced = self
+            .balance
+            .iter()
+            .flat_map(|balance| balance.candidates.iter().copied());
         self.stages
             .iter()
             .flat_map(StageSpec::remote_candidates)
+            .chain(balanced)
             .collect()
+    }
+
+    fn validate_balance(&self, balance: &BalanceSpec) -> anyhow::Result<()> {
+        ensure!(
+            self.layers >= 1,
+            "a balanced model needs at least one layer"
+        );
+        ensure!(
+            balance.layer_bytes > 0,
+            "balance.layer_bytes must be positive"
+        );
+        ensure!(
+            balance.local.budget_bytes > 0,
+            "balance.local needs a positive budget_bytes"
+        );
+        let mut workers = HashSet::new();
+        for worker in &balance.candidates {
+            ensure!(
+                workers.insert(*worker),
+                "worker {} is listed more than once in balance.candidates",
+                worker.fmt_short()
+            );
+        }
+        Ok(())
     }
 
     fn validate_limits(&self) -> anyhow::Result<()> {
@@ -962,6 +1094,83 @@ mod tests {
         );
         assert!(ShardManifest::load(&dir.join("missing.json")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn balanced(candidates: &[u8]) -> Value {
+        let ids: Vec<String> = candidates.iter().map(|&seed| worker_id(seed)).collect();
+        let mut value = manifest_json(vec![]);
+        let object = value.as_object_mut().unwrap();
+        object.remove("stages");
+        object.insert(
+            "balance".to_owned(),
+            json!({
+                "candidates": ids,
+                "local": {"model": "full.gguf", "budget_bytes": 1024},
+                "layer_bytes": 300,
+            }),
+        );
+        value
+    }
+
+    #[test]
+    fn a_balanced_manifest_needs_no_stages_and_has_defaults() {
+        let manifest = validate(balanced(&[1, 2])).unwrap();
+        assert!(manifest.stages.is_empty());
+        let balance = manifest.balance.as_ref().unwrap();
+        assert_eq!(balance.candidates.len(), 2);
+        assert_eq!(balance.reserve_bytes, DEFAULT_RESERVE_BYTES);
+        assert_eq!(balance.stage_overhead_bytes, DEFAULT_STAGE_OVERHEAD_BYTES);
+        assert_eq!((balance.embedding_bytes, balance.output_bytes), (0, 0));
+        assert_eq!(balance.local.offer_bytes, None);
+        assert_eq!(balance.layer_cost(128), 300);
+        assert_eq!(manifest.remote_workers().len(), 2);
+        assert!(
+            validate(balanced(&[])).is_ok(),
+            "no candidates runs everything locally"
+        );
+    }
+
+    #[test]
+    fn layer_cost_includes_the_kv_cache_for_the_context() {
+        let mut value = balanced(&[1]);
+        value["balance"]["kv_bytes_per_token"] = json!(4096);
+        let manifest = validate(value).unwrap();
+        assert_eq!(manifest.balance.unwrap().layer_cost(512), 300 + 4096 * 512);
+    }
+
+    #[test]
+    fn a_balanced_manifest_is_checked() {
+        let mut both = balanced(&[1]);
+        both["stages"] = json!([local(0, 4)]);
+        assert!(error_of(both).contains("not both"));
+        let mut zero_layer = balanced(&[1]);
+        zero_layer["balance"]["layer_bytes"] = json!(0);
+        assert!(error_of(zero_layer).contains("layer_bytes"));
+        let mut zero_budget = balanced(&[1]);
+        zero_budget["balance"]["local"]["budget_bytes"] = json!(0);
+        assert!(error_of(zero_budget).contains("budget_bytes"));
+        assert!(error_of(balanced(&[1, 1])).contains("more than once"));
+        let mut neither = manifest_json(vec![]);
+        neither.as_object_mut().unwrap().remove("stages");
+        assert!(error_of(neither).contains("no stages"));
+    }
+
+    #[test]
+    fn ring_execution_refuses_a_balance_section() {
+        let mut value = balanced(&[1]);
+        value["execution"] = json!("ring");
+        let error = error_of(value);
+        assert!(error.contains("does not support \"balance\""), "{error}");
+    }
+
+    #[test]
+    fn unknown_balance_fields_are_refused() {
+        let mut top = balanced(&[1]);
+        top["balance"]["reserve"] = json!(1);
+        assert!(parse(top).is_err());
+        let mut local = balanced(&[1]);
+        local["balance"]["local"]["artifact_sha256"] = json!(HASH);
+        assert!(parse(local).is_err());
     }
 
     #[test]

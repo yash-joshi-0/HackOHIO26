@@ -27,6 +27,9 @@ forwards to it just as it forwards to `llama-server`.
 4. If a stage fails in a way a fresh attempt might fix, the front end resumes the generation on
    new stage links (see [Retries and standby workers](#retries-and-standby-workers)).
 
+With a balanced manifest, step 2 first chooses the layer ranges from the nodes' free memory, on
+every attempt (see [Balanced mode](#balanced-mode)).
+
 ## Retries and standby workers
 
 A runner holds one sequence whose cache only grows and cannot be reset, and it insists on
@@ -82,7 +85,43 @@ Limits:
   the local runner's model load.
 - A standby must already run `shard-serve` with the identical stage artifact (same range, same
   model identity) and allowlist the leader. Nothing is copied or loaded on demand.
-- Replanning a stage onto surviving peers is M-28; ring mode (M-27) is not covered.
+- A fixed-stage manifest never moves layers between peers. A balanced manifest
+  ([Balanced mode](#balanced-mode)) replans the ranges on every retry. Retries, standby
+  workers and balancing are pipeline-only: ring execution (M-27) fails the job on any error, and
+  a ring manifest that lists `standby` workers or a `balance` section is refused.
+
+## Balanced mode
+
+Instead of fixed `stages`, a manifest can carry a `balance` section (M-28). Every candidate
+worker and the leader then hold the **full** model file, and at every prompt start (and every
+retry) the front end:
+
+1. probes each candidate worker for its free memory and model identity over the RPC bridge ALPN
+   (`MSH2\n{"type":"probe"}`), skipping workers whose probe fails;
+2. measures its own free memory;
+3. picks the remote with the most free memory (among those that failed least recently) and
+   splits the layers between it and the leader by smooth weighted round robin over free memory
+   minus a reserve and per-stage overheads, never past what a node can hold;
+4. opens the remote session for its chosen range (`{"type":"session","begin":B,"end":E}`) and
+   spawns the local runner over the full model with the final range, checking each stage's
+   metadata against the chosen range.
+
+```json
+"balance": {
+  "candidates": ["<worker node id>"],
+  "local": {"model": "/models/full.gguf", "gpu_layers": 99, "budget_bytes": 21474836480},
+  "layer_bytes": 300000000,
+  "kv_bytes_per_token": 4096,
+  "embedding_bytes": 400000000,
+  "output_bytes": 400000000
+}
+```
+
+Workers run `shard-serve --layers <N>` with the full model (`--range` is then optional), and
+may cap what they report with `--offer-bytes`. The algorithm, protocol, worked example
+(Raspberry Pi, laptop, workstation), manifest fields and limits are in
+[layer-balancing.md](layer-balancing.md). In v1 at most one remote takes part, so balancing
+chooses which candidate serves the prefix and where to cut; three or more nodes need M-27.
 
 The frontend buffers at most 16 text events for a slow HTTP reader; generation applies
 backpressure instead of accumulating an unbounded queue. A disconnected client signals
@@ -108,6 +147,11 @@ llm-cluster shard-serve \
 It prints `node id: <id>`; put that ID in the leader's manifest. `--allow-peer` is required and
 repeatable: other peers are refused. `--source-sha256` is for an exported shard, which reports
 the original model's identity; leave it out when `--model` is the full model file.
+
+For a balanced manifest, give the full model and its layer count instead of a range:
+`--layers 64` lets leaders ask for any range per session, and `--offer-bytes <N>` caps the free
+memory the worker reports. A worker started with only `--range` keeps refusing other ranges, so
+fixed-stage manifests run unchanged.
 
 On the leader:
 
@@ -167,7 +211,8 @@ so it exists only on the llama backend.
 | `context` | Context window passed to every stage, 32 to 4096. A prompt longer than this is refused with HTTP 400. |
 | `max_tokens` | Cap on completion tokens (default 512); a request may ask for fewer. |
 | `chat_template` | Required: `"chatml"` or a pinned Jinja template object; the template is never guessed. See [Chat templates](#chat-templates). |
-| `stages` | Layer ranges in order, half-open, covering `0..layers` with no gaps. Each has `begin`, `end` and exactly one of `remote` or `local`. |
+| `stages` | Layer ranges in order, half-open, covering `0..layers` with no gaps. Each has `begin`, `end` and exactly one of `remote` or `local`. Omitted in a balanced manifest. |
+| `balance` | Balanced mode instead of `stages` (pipeline execution only): candidate workers, the leader's full model and the memory sizes the plan uses. See [layer-balancing.md](layer-balancing.md#manifest). |
 | `remote.worker` | Node ID of the `shard-serve` worker for this range. The leader dials it by ID: through Iroh's n0 discovery in production, or in-memory address lookup in tests. |
 | `remote.standby` | Optional list of node IDs of workers serving the identical stage, tried in order when the primary fails (see [Retries and standby workers](#retries-and-standby-workers)). No node ID may appear twice anywhere in the manifest, as primary or standby. |
 | `local.model` | Model or exported shard file the local runner loads. |
@@ -392,8 +437,10 @@ job, a worker that does not allowlist the leader, and an invalid manifest.
 that fails once (`FAKE_SHARD_FAIL_AT_STEP` with `FAKE_SHARD_FAIL_ONCE_FILE`) is resumed with
 the same text and token count as an uninterrupted run, an unreachable or failing primary hands
 over to its standby, a remote stage with no standby retries its worker, exhausted retries
-end the job, and fatal errors are not retried. Build the
-helpers first:
+end the job, and fatal errors are not retried. Its balanced tests run real full-model
+`shard-serve` workers: the cut follows the free memory they report, a later prompt and a retry
+both replan, and a plan that cannot fit fails at once. `tests/shard_serve.rs` covers probes and
+per-session ranges. Build the helpers first:
 
 ```sh
 cargo build --examples
