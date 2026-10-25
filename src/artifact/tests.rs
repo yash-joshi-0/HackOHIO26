@@ -385,13 +385,30 @@ async fn seed_rejects_mismatched_sidecar_and_missing_terminal_role() {
     let spec = SeedSpec {
         model: manifest.model.clone(),
         source: dir.path().join("source.gguf"),
-        shards: vec![shard],
+        shards: vec![shard.clone()],
     };
     assert!(
         Seed::verify(spec, node.address(), &CancellationToken::new())
             .await
             .is_err()
     );
+    fs::write(&report_path, vec![0; 8 * 1024 * 1024 + 1])
+        .await
+        .unwrap();
+    let error = Seed::verify(
+        SeedSpec {
+            model: manifest.model.clone(),
+            source: dir.path().join("source.gguf"),
+            shards: vec![shard],
+        },
+        node.address(),
+        &CancellationToken::new(),
+    )
+    .await
+    .err()
+    .expect("oversized export report must be rejected")
+    .to_string();
+    assert!(error.contains("export report too large"), "{error}");
     node.close().await;
 }
 

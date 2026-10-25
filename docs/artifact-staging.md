@@ -60,7 +60,8 @@ A private `SeedSpec` JSON contains `model`, `source` (full GGUF path), and `shar
 `.gguf.json` report. `Seed::verify`:
 
 1. Hashes the full source and checks pinned size/SHA-256.
-2. Checks each report's source identity, architecture and decoder count.
+2. Reads each report with an 8 MiB limit, then checks its source identity,
+   architecture and decoder count.
 3. Hashes each shard, checking its reported size/SHA-256.
 4. Reads the physical little-endian GGUF v3 header: checks embedded source/range,
    decoder count excluding MTP, actual tensor names against the report, every
