@@ -478,6 +478,24 @@ fn whole_physical_pool_peak_and_reserves_enforce_capacity() {
 }
 
 #[test]
+fn usable_capacity_is_not_charged_for_reservations_twice() {
+    let (mut input, _) = inputs(1000);
+    input.peers[0].available_bytes.ram = 512;
+    input.peers[0].reserved_bytes.ram = 512;
+    input.peers[0].budget_bytes.ram = 1024;
+    assert!(plan_ring(&input, 1100).unwrap().plan.is_some());
+
+    // Usable capacity is already net of existing reservations, so the range peak
+    // must fit it independently of the approved contribution budget.
+    input.peers[0].available_bytes.ram = 511;
+    assert!(plan_ring(&input, 1100).unwrap().plan.is_none());
+
+    input.peers[0].available_bytes.ram = 512;
+    input.peers[0].budget_bytes.ram = 1023;
+    assert!(plan_ring(&input, 1100).unwrap().plan.is_none());
+}
+
+#[test]
 fn cli_checks_prepares_and_revalidates_without_opening_sockets() {
     let now: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)

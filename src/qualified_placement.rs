@@ -666,7 +666,8 @@ fn compile(input: &EvidenceRequest, now: u64) -> anyhow::Result<Compiled> {
             .iter()
             .all(|&(peak, reserved, budget, available)| {
                 peak.checked_add(reserved)
-                    .is_some_and(|total| total <= budget && total <= available)
+                    .is_some_and(|total| total <= budget)
+                    && peak <= available
             });
             require(&mut reasons, fits, "physical_pool_budget_exceeded");
         }

@@ -253,7 +253,7 @@ fn plan_with_topology(
                 .peak_bytes
                 .add(&peer.reserved_bytes)
                 .ok_or(MeasuredError::Overflow)?;
-            if !charged.fits(&peer.budget_bytes) || !charged.fits(&peer.available_bytes) {
+            if !charged.fits(&peer.budget_bytes) || !range.peak_bytes.fits(&peer.available_bytes) {
                 continue;
             }
             if observed

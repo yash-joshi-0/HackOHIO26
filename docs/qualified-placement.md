@@ -87,11 +87,13 @@ execution. The search minimizes their sum. **The sum of component p95 values is
 not an end-to-end latency p95 or a statistical guarantee.** Prefill samples are
 required, but this objective does not predict prefill latency or throughput.
 
-For each physical pool, charge the greater of load and inference peaks plus
-reserve; check both approved budget and fresh usable capacity. Count unified
-memory once in shared. Do not add RSS to GGML buffers. Accounting evidence must
-cover load temporaries, staging, native/host processes, drivers, state, scratch
-and outputs within an explicit attribution boundary.
+For each physical pool, the greater of load and inference peaks must fit the
+fresh usable capacity (which is already net of existing reservations), and that
+peak plus the separately reported reservations must fit the owner-approved
+contribution budget. Do not subtract reservations from usable capacity again.
+Count unified memory once in shared. Do not add RSS to GGML buffers. Accounting
+evidence must cover load temporaries, staging, native/host processes, drivers,
+state, scratch and outputs within an explicit attribution boundary.
 
 ## Binding and revalidation
 
