@@ -272,6 +272,10 @@ Controls:
 └── log.jsonl       later changes, one per line: { generation, index, entry } or { generation, epoch }
 ```
 
+On Unix, the `history` and conversation directories are restricted to the current user
+(`0700`), and the metadata, snapshot, log and temporary snapshot files to the current user
+(`0600`). Opening an existing store tightens these permissions as well.
+
 - **The epoch lives with the history.** It's in `snapshot.json`, and changes after the snapshot are `{generation, epoch}` log lines. On load, the epoch is the highest of the snapshot's, the log's and the newest `EpochAdvanced` in the history. No crash can leave new history paired with an old epoch.
 - **Writes** (`record`) are one write per call, epoch line first, flushed with `sync_data` before returning.
 - **Atomic replacement:** write a temporary file, flush it, rename it over the old one, then flush the directory (Unix).

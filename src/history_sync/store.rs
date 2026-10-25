@@ -204,6 +204,7 @@ impl HistoryStore {
             return Ok(store);
         }
         fs::create_dir_all(&dir).map_err(io_at(&dir))?;
+        secure_history_permissions(&dir)?;
         let meta = StoreMeta {
             format_version: FORMAT_VERSION,
             ..meta
@@ -235,6 +236,7 @@ impl HistoryStore {
         if !meta_path.exists() {
             return Err(StoreError::NotFound(dir));
         }
+        secure_history_permissions(&dir)?;
         let meta: StoreMeta = read_json(&meta_path)?;
         if meta.format_version != FORMAT_VERSION {
             return Err(StoreError::UnsupportedVersion {
@@ -592,7 +594,24 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), StoreEr
         source,
     })?;
     let temp = path.with_extension("tmp");
-    let mut file = File::create(&temp).map_err(io_at(&temp))?;
+    match fs::symlink_metadata(&temp) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => {
+            return Err(StoreError::Corrupt {
+                path: temp,
+                reason: "history temporary files must be regular files".to_owned(),
+            });
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(io_at(&temp)(error)),
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&temp)
+        .map_err(io_at(&temp))?;
+    set_private_file_permissions(&file).map_err(io_at(&temp))?;
     file.write_all(&bytes).map_err(io_at(&temp))?;
     file.sync_all().map_err(io_at(&temp))?;
     drop(file);
@@ -614,11 +633,64 @@ fn sync_parent_dir(path: &Path) -> Result<(), StoreError> {
 }
 
 fn open_log(path: &Path) -> Result<File, StoreError> {
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(io_at(path))
+        .map_err(io_at(path))?;
+    set_private_file_permissions(&file).map_err(io_at(path))?;
+    Ok(file)
+}
+
+/// Restricts stored prompts and responses to the current user on Unix systems.
+fn secure_history_permissions(dir: &Path) -> Result<(), StoreError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(parent) = dir.parent() {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+                .map_err(io_at(parent))?;
+        }
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(io_at(dir))?;
+        for name in [
+            META_FILE,
+            SNAPSHOT_FILE,
+            LOG_FILE,
+            "meta.tmp",
+            "snapshot.tmp",
+        ] {
+            let path = dir.join(name);
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_file() => {
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                        .map_err(io_at(&path))?;
+                }
+                Ok(_) if matches!(name, "meta.tmp" | "snapshot.tmp") => {}
+                Ok(_) => {
+                    return Err(StoreError::Corrupt {
+                        path,
+                        reason: "history files must be regular files".to_owned(),
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_at(&path)(error)),
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
+fn set_private_file_permissions(file: &File) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    let _ = file;
+    Ok(())
 }
 
 /// Reads every complete log line. A final line without its newline was torn by a crash

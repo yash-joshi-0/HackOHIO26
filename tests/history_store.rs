@@ -52,6 +52,44 @@ fn meta() -> StoreMeta {
     StoreMeta::new(CONVERSATION, "cluster-a", model("sha256:abc"))
 }
 
+#[cfg(unix)]
+#[test]
+fn history_store_permissions_are_private_on_create_and_load() {
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(path: &std::path::Path) -> u32 {
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    let dir = DataDir::new("private-permissions");
+    drop(HistoryStore::open(&dir.0, meta()).unwrap());
+    let history_dir = dir.0.join("history");
+    let conversation_dir = history_dir.join(CONVERSATION);
+    for path in [&history_dir, &conversation_dir] {
+        assert_eq!(mode(path), 0o700, "{}", path.display());
+    }
+    for name in ["meta.json", "snapshot.json", "log.jsonl"] {
+        assert_eq!(mode(&conversation_dir.join(name)), 0o600, "{name}");
+    }
+
+    fs::set_permissions(&history_dir, fs::Permissions::from_mode(0o777)).unwrap();
+    fs::set_permissions(&conversation_dir, fs::Permissions::from_mode(0o777)).unwrap();
+    for name in ["meta.json", "snapshot.json", "log.jsonl"] {
+        fs::set_permissions(
+            conversation_dir.join(name),
+            fs::Permissions::from_mode(0o666),
+        )
+        .unwrap();
+    }
+    drop(HistoryStore::load(&dir.0, CONVERSATION).unwrap());
+
+    assert_eq!(mode(&history_dir), 0o700);
+    assert_eq!(mode(&conversation_dir), 0o700);
+    for name in ["meta.json", "snapshot.json", "log.jsonl"] {
+        assert_eq!(mode(&conversation_dir.join(name)), 0o600, "{name}");
+    }
+}
+
 fn job(n: usize) -> Vec<Entry> {
     let request_id = format!("job-{n}");
     vec![
