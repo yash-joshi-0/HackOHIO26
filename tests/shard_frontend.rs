@@ -173,6 +173,22 @@ impl FakeWorker {
     /// Like [`FakeWorker::start`], but every session's runner exits on receiving step
     /// `fail_at_step`, if set.
     async fn start_failing(stage: WorkerStage, fail_at_step: Option<u32>) -> Self {
+        let env = fail_at_step.map(|step| (FAIL_AT_STEP_ENV, step.to_string()));
+        Self::start_with_env(stage, env.into_iter().collect()).await
+    }
+
+    /// Like [`FakeWorker::start_failing`], but only the first session's runner fails: it
+    /// creates `marker`, which later runners find.
+    async fn start_failing_once(stage: WorkerStage, fail_at_step: u32, marker: &Path) -> Self {
+        let env = vec![
+            (FAIL_AT_STEP_ENV, fail_at_step.to_string()),
+            (FAIL_ONCE_FILE_ENV, marker.to_string_lossy().into_owned()),
+        ];
+        Self::start_with_env(stage, env).await
+    }
+
+    /// Starts a worker whose session runners get `env`.
+    async fn start_with_env(stage: WorkerStage, env: Vec<(&'static str, String)>) -> Self {
         let endpoint = bind_endpoint(vec![RPC_BRIDGE_ALPN.to_vec()], None).await;
         let accepting = endpoint.clone();
         let sessions = Arc::new(AtomicUsize::new(0));
@@ -183,7 +199,7 @@ impl FakeWorker {
                     continue;
                 };
                 counter.fetch_add(1, Ordering::SeqCst);
-                tokio::spawn(serve_session(connection, stage, fail_at_step));
+                tokio::spawn(serve_session(connection, stage, env.clone()));
             }
         });
         Self {
@@ -204,14 +220,17 @@ impl FakeWorker {
 }
 
 /// One worker session: preface, runner, metadata with `model_sha256`, then a byte relay.
-async fn serve_session(connection: Connection, stage: WorkerStage, fail_at_step: Option<u32>) {
+async fn serve_session(
+    connection: Connection,
+    stage: WorkerStage,
+    env: Vec<(&'static str, String)>,
+) {
     let Ok((mut send, mut recv)) = connection.accept_bi().await else {
         return;
     };
     wire::read_preface(&mut recv).await.expect("client preface");
-    let fail_env = fail_at_step.map(|step| (FAIL_AT_STEP_ENV, step.to_string()));
     let mut child = Command::new(example_bin("fake_shard_runner"))
-        .envs(fail_env)
+        .envs(env)
         .arg(fixture_model())
         .args([
             stage.begin.to_string(),
@@ -614,7 +633,9 @@ async fn an_unreachable_primary_hands_its_stage_to_the_standby() {
 
 #[tokio::test]
 async fn a_primary_failing_mid_generation_is_replaced_by_its_standby() {
-    let primary = FakeWorker::start_failing(PREFIX, Some(3)).await;
+    // The primary would recover, but the standby that has not failed is preferred.
+    let marker = temp_path("primary-fails-once");
+    let primary = FakeWorker::start_failing_once(PREFIX, 3, &marker).await;
     let standby = FakeWorker::start(PREFIX).await;
     let model = fixture_model();
     let primary_id = primary.endpoint.id().to_string();
@@ -627,14 +648,45 @@ async fn a_primary_failing_mid_generation_is_replaced_by_its_standby() {
     let (status, body) = frontend.chat(true, "hi").await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(streamed_text(&body), fixture_reply(), "{body}");
+    assert!(marker.exists(), "the primary failed");
     assert_eq!((primary.sessions(), standby.sessions()), (1, 1));
     frontend.stop().await;
     primary.stop().await;
     standby.stop().await;
+    std::fs::remove_file(&marker).expect("remove marker");
 }
 
 #[tokio::test]
-async fn a_stage_whose_workers_all_fail_ends_the_generation() {
+async fn a_remote_stage_without_standby_retries_its_worker() {
+    let marker = temp_path("worker-fails-once");
+    let worker = FakeWorker::start_failing_once(PREFIX, 3, &marker).await;
+    let model = fixture_model();
+    let stages = vec![
+        remote_stage(0, 2, &worker.endpoint),
+        local_stage(2, LAYERS, &model, &[]),
+    ];
+    let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &[&worker]).await;
+    let (status, body) = frontend.chat(true, "hi").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(streamed_text(&body), fixture_reply(), "{body}");
+    assert!(marker.exists(), "the first attempt failed");
+    assert_eq!(worker.sessions(), 2, "the only worker was dialled again");
+
+    std::fs::remove_file(&marker).expect("remove marker");
+    let completion = frontend.chat_ok().await;
+    assert_completion(&completion);
+    assert_eq!(
+        completion["usage"]["completion_tokens"],
+        fixture_reply().len()
+    );
+    assert_eq!(worker.sessions(), 4);
+    frontend.stop().await;
+    worker.stop().await;
+    std::fs::remove_file(&marker).expect("remove marker");
+}
+
+#[tokio::test]
+async fn a_stage_whose_workers_keep_failing_uses_up_the_retries() {
     let primary = FakeWorker::start_failing(PREFIX, Some(3)).await;
     let standby = FakeWorker::start_failing(PREFIX, Some(3)).await;
     let model = fixture_model();
@@ -646,11 +698,22 @@ async fn a_stage_whose_workers_all_fail_ends_the_generation() {
     let workers = [&primary, &standby];
     let frontend = Frontend::start(manifest(FIXTURE_SHA, CONTEXT, stages), &workers).await;
     let message = frontend.chat_error(false).await;
+    let attempts = MAX_GENERATION_RETRIES as usize + 1;
     assert!(
-        message.contains("every worker for stage 0..2 has failed"),
+        message.contains(&format!("generation failed after {attempts} attempts")),
         "{message}"
     );
-    assert_eq!((primary.sessions(), standby.sessions()), (1, 1));
+    // Primary, then the standby, then the primary again as the least recently failed.
+    assert_eq!(
+        attempts, 3,
+        "the session counts below assume three attempts"
+    );
+    assert_eq!((primary.sessions(), standby.sessions()), (2, 1));
+    let last = primary.endpoint.id().fmt_short().to_string();
+    assert!(
+        message.contains(&format!("stage 0 on worker {last}")),
+        "{message}"
+    );
     frontend.stop().await;
     primary.stop().await;
     standby.stop().await;

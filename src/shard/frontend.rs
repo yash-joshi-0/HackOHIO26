@@ -17,22 +17,23 @@
 //! One generation runs at a time; later requests wait for the lock. In pipeline execution a
 //! retryable failure (see [`crate::shard::pipeline::classify`]) resumes the generation on fresh
 //! links, up to [`MAX_GENERATION_RETRIES`] times: completed text is never sent twice, a remote
-//! worker that failed is replaced by the stage's next standby, and local stages are started
-//! again. Ring execution is never retried: any ring failure fails the generation.
+//! worker that failed is replaced by the stage's next standby (or, with none left that has not
+//! failed, tried again), and local stages are started again. Ring execution is never retried:
+//! any ring failure fails the generation.
 //! A fatal failure, or one that exhausts the retries, before any response bytes are sent is
 //! a JSON error with a 5xx status (400 for a prompt longer than the context). One mid-stream
 //! sends an SSE `error` event and ends without `[DONE]`, which makes the job API fail the job
 //! without committing history. A client that disconnects cancels its generation at once, with
 //! no retry, which kills the local runners and closes the remote streams.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, bail};
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
@@ -58,8 +59,8 @@ use crate::shard::manifest::{ShardManifest, StageLocation, StageSpec};
 use crate::shard::manifest::{same_sha256, sha256_file};
 use crate::shard::pipeline::{
     FailureClass, FinishReason, Generation, GenerationCancelled, GenerationLimits, GenerationState,
-    LocalLaunch, METADATA_TIMEOUT, Pipeline, PromptTooLong, StageExpectation, StageIdentity,
-    StageLink, classify,
+    LocalLaunch, METADATA_TIMEOUT, Pipeline, PromptTooLong, StageExpectation, StageFault,
+    StageIdentity, StageLink, classify,
 };
 use crate::shard::ring_origin::{RingLink, RingPlan, RingSettings};
 use crate::shard::template::{ChatMessage, ChatRenderer};
@@ -622,8 +623,9 @@ async fn spawn_local_stage(
 
 /// Pipeline execution: resumes the generation on fresh links after a retryable failure (up to
 /// [`MAX_GENERATION_RETRIES`] times, backing off between attempts, and starting no attempt
-/// after [`RETRY_DEADLINE`]). A remote worker that failed is not dialled again for this
-/// generation; local stages are simply started again. A client disconnect ends it at once.
+/// after [`RETRY_DEADLINE`]). A remote worker that failed is tried again only after its
+/// stage's other candidates; local stages are simply started again. A client disconnect ends
+/// it at once.
 async fn generate_pipeline(
     state: &FrontendState,
     prompt: &str,
@@ -642,12 +644,12 @@ async fn generate_pipeline(
             let _ = events.send(Event::Text(text)).await;
         }
     });
-    let excluded = StdMutex::new(HashSet::new());
+    let failed = StdMutex::new(FailedWorkers::default());
     let attempt = AttemptContext {
         state,
         prompt,
         events,
-        excluded: &excluded,
+        failed: &failed,
     };
     let mut budget = RetryBudget::new();
     let mut started = false;
@@ -659,9 +661,10 @@ async fn generate_pipeline(
         let fault = attempt.retryable_fault(error)?;
         let Some(delay) = budget.next_delay() else {
             let attempts = budget.attempts();
-            return Err(fault
-                .error
-                .context(format!("generation failed after {attempts} attempts")));
+            let location = fault.location();
+            return Err(fault.error.context(format!(
+                "generation failed after {attempts} attempts{location}"
+            )));
         };
         warn!(
             attempt = budget.attempts(),
@@ -684,6 +687,22 @@ struct RetryableFault {
     error: anyhow::Error,
     stage: Option<usize>,
     worker: Option<EndpointId>,
+}
+
+impl RetryableFault {
+    /// Where the attempt failed, as a suffix for the final error, or `""` when unknown.
+    fn location(&self) -> String {
+        match (self.stage, self.worker) {
+            (Some(stage), Some(worker)) => {
+                format!(
+                    " (last failure: stage {stage} on worker {})",
+                    worker.fmt_short()
+                )
+            }
+            (Some(stage), None) => format!(" (last failure: stage {stage}, local runner)"),
+            (None, _) => String::new(),
+        }
+    }
 }
 
 /// How many more attempts a generation may make, and how long it waits before each.
@@ -720,13 +739,32 @@ impl RetryBudget {
     }
 }
 
-/// Remote workers that failed during the current generation and are not dialled again.
-type Excluded = StdMutex<HashSet<EndpointId>>;
+/// Remote workers that failed during the current generation, each with the sequence number
+/// of its latest failure. A failed worker is not banned, only tried after the others.
+#[derive(Default)]
+struct FailedWorkers {
+    latest: HashMap<EndpointId, u64>,
+    failures: u64,
+}
 
-/// Locks the excluded set. It is never held across an await, and a poisoned lock still
-/// holds a usable set, so poisoning is ignored.
-fn lock(excluded: &Excluded) -> MutexGuard<'_, HashSet<EndpointId>> {
-    excluded.lock().unwrap_or_else(PoisonError::into_inner)
+impl FailedWorkers {
+    fn record(&mut self, worker: EndpointId) {
+        self.failures += 1;
+        self.latest.insert(worker, self.failures);
+    }
+
+    /// `candidates` in the order to try them: those that have not failed keep their order
+    /// (primary, then standbys), followed by failed ones, least recently failed first.
+    fn order(&self, mut candidates: Vec<EndpointId>) -> Vec<EndpointId> {
+        candidates.sort_by_key(|candidate| self.latest.get(candidate).copied());
+        candidates
+    }
+}
+
+/// Locks the failure record. It is never held across an await, and a poisoned lock still
+/// holds a usable record, so poisoning is ignored.
+fn lock(failed: &StdMutex<FailedWorkers>) -> MutexGuard<'_, FailedWorkers> {
+    failed.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// What one attempt of a generation needs from its caller.
@@ -734,31 +772,21 @@ struct AttemptContext<'a> {
     state: &'a FrontendState,
     prompt: &'a str,
     events: &'a Sender<Event>,
-    excluded: &'a Excluded,
+    failed: &'a StdMutex<FailedWorkers>,
 }
 
 impl AttemptContext<'_> {
-    /// Classifies a failed attempt and excludes the remote worker it blames. Returns the
-    /// error itself when a retry cannot help: it is fatal, or a remote stage has no worker
-    /// left to try.
+    /// Classifies a failed attempt and records the remote worker it blames, so the next
+    /// attempt prefers that stage's other candidates. Returns the error itself when it is
+    /// fatal, since a retry cannot help.
     fn retryable_fault(&self, error: anyhow::Error) -> anyhow::Result<RetryableFault> {
         let classified = classify(&error);
         if classified.class == FailureClass::Fatal {
             return Err(error);
         }
         let worker = classified.fault.and_then(|fault| fault.worker);
-        let mut excluded = lock(self.excluded);
-        excluded.extend(worker);
-        let exhausted = self.state.manifest.stages.iter().find(|stage| {
-            !stage.is_local()
-                && stage
-                    .remote_candidates()
-                    .iter()
-                    .all(|candidate| excluded.contains(candidate))
-        });
-        if let Some(stage) = exhausted {
-            let (begin, end) = (stage.begin, stage.end);
-            return Err(error.context(format!("every worker for stage {begin}..{end} has failed")));
+        if let Some(worker) = worker {
+            lock(self.failed).record(worker);
         }
         Ok(RetryableFault {
             error,
@@ -802,27 +830,27 @@ impl AttemptContext<'_> {
     /// Opens every stage of the pipeline manifest at once and validates them.
     async fn open_pipeline(&self) -> anyhow::Result<Pipeline> {
         let stages = &self.state.manifest.stages;
-        let links = try_join_all(stages.iter().map(|stage| self.open_link(stage))).await?;
+        let opening = stages.iter().enumerate();
+        let links =
+            try_join_all(opening.map(|(index, stage)| self.open_link(index, stage))).await?;
         Pipeline::new(links, &self.state.expectations)
     }
 
-    /// Opens one stage's link: a fresh local runner, or a remote candidate.
-    async fn open_link(&self, stage: &StageSpec) -> anyhow::Result<StageLink> {
+    /// Opens the link of stage `index`: a fresh local runner, or a remote candidate.
+    async fn open_link(&self, index: usize, stage: &StageSpec) -> anyhow::Result<StageLink> {
         match &stage.location {
-            StageLocation::Remote { .. } => self.open_remote(stage).await,
+            StageLocation::Remote { .. } => self.open_remote(index, stage).await,
             StageLocation::Local { .. } => spawn_local_stage(self.state, stage, self.prompt).await,
         }
     }
 
-    /// Tries the stage's candidates in order (primary, then standbys), skipping excluded
-    /// ones. A candidate that fails with a retryable error is excluded and the next one is
-    /// tried; a fatal error ends the attempt. Returns the last error once none is left.
-    async fn open_remote(&self, stage: &StageSpec) -> anyhow::Result<StageLink> {
+    /// Tries every candidate of stage `index` once, in [`FailedWorkers::order`]. A candidate
+    /// that fails with a retryable error is recorded and the next one is tried; a fatal error
+    /// ends the attempt. Once all have failed, returns the last error, blamed on that worker.
+    async fn open_remote(&self, index: usize, stage: &StageSpec) -> anyhow::Result<StageLink> {
+        let candidates = lock(self.failed).order(stage.remote_candidates());
         let mut last_error = None;
-        for worker in stage.remote_candidates() {
-            if lock(self.excluded).contains(&worker) {
-                continue;
-            }
+        for worker in candidates {
             let endpoint = &self.state.endpoint;
             let error = match StageLink::connect_remote(endpoint, worker, METADATA_TIMEOUT).await {
                 Ok(link) => return Ok(link),
@@ -837,16 +865,17 @@ impl AttemptContext<'_> {
                 error = %format!("{error:#}"),
                 "remote stage worker failed; trying the next candidate"
             );
-            lock(self.excluded).insert(worker);
-            last_error = Some(error);
+            lock(self.failed).record(worker);
+            last_error = Some((worker, error));
         }
-        Err(last_error.unwrap_or_else(|| {
-            anyhow!(
-                "every worker for stage {}..{} has failed",
-                stage.begin,
-                stage.end
-            )
-        }))
+        let Some((worker, error)) = last_error else {
+            bail!("stage {}..{} has no remote worker", stage.begin, stage.end);
+        };
+        let fault = StageFault {
+            stage: index,
+            worker: Some(worker),
+        };
+        Err(error.context(fault))
     }
 }
 
@@ -954,6 +983,25 @@ mod tests {
     use crate::shard::manifest::ChatTemplate;
 
     const CAP: u32 = 64;
+
+    fn worker(seed: u8) -> EndpointId {
+        iroh::SecretKey::from_bytes(&[seed; 32]).public()
+    }
+
+    #[test]
+    fn failed_workers_are_tried_last_least_recently_failed_first() {
+        let (primary, first, second) = (worker(1), worker(2), worker(3));
+        let candidates = vec![primary, first, second];
+        let mut failed = FailedWorkers::default();
+        assert_eq!(failed.order(candidates.clone()), candidates);
+        failed.record(primary);
+        assert_eq!(failed.order(candidates.clone()), [first, second, primary]);
+        failed.record(second);
+        failed.record(first);
+        assert_eq!(failed.order(candidates.clone()), [primary, second, first]);
+        failed.record(primary);
+        assert_eq!(failed.order(candidates), [second, first, primary]);
+    }
 
     fn parse(body: Value) -> Result<ChatRequest, String> {
         let renderer = ChatRenderer::load(&ChatTemplate::Chatml).unwrap();

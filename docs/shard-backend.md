@@ -36,7 +36,7 @@ tokens, every token generated so far, the text already sent, including a UTF-8 c
 that is only partly received) and resumes it on fresh links:
 
 1. It opens new links: local stages get new runner processes, and a remote stage dials its
-   next usable worker (below).
+   most preferred worker (below).
 2. The new links are checked exactly as on the first attempt. The new final stage must
    tokenize the prompt exactly as the first one did; a difference is fatal.
 3. The prompt plus every generated token is prefilled again, in batches of at most 128,
@@ -66,12 +66,15 @@ A remote stage may list standby workers:
 {"begin": 0, "end": 32, "remote": {"worker": "<primary node id>", "standby": ["<standby node id>"]}}
 ```
 
-Each attempt tries the stage's workers in order, primary first, skipping any worker that has
-already failed during this job. A worker whose dial or metadata read fails is skipped at once
-and the next one is tried within the same attempt; a worker that fails mid-generation is not
-dialled again for that job. Once every worker of a stage has failed, the job fails. A remote
-stage with no standby therefore gets no retry when its worker fails; only failures of local
-stages (or of a stage whose standby remains) are retried.
+A worker that fails is not banned, only tried later. Each attempt orders the stage's workers
+by preference: those that have not failed during this job first, in order (primary, then
+standbys), then those that have, least recently failed first. A worker whose dial or metadata
+read fails is passed over at once and the next one is tried within the same attempt; if every
+worker fails, the attempt fails with a retryable error. A worker that fails mid-generation
+goes to the back of the order for the next attempt. Only the retry budget above (or a fatal
+error, or the client leaving) ends the job, so a remote stage with no standby simply retries
+its one worker, for example after a brief network outage. When the retries run out, the error
+reads `generation failed after N attempts (last failure: stage S on worker W)`.
 
 Limits:
 
@@ -388,7 +391,8 @@ job, a worker that does not allowlist the leader, and an invalid manifest.
 `tests/shard_frontend.rs` covers retries and standbys against the front end directly: a stage
 that fails once (`FAKE_SHARD_FAIL_AT_STEP` with `FAKE_SHARD_FAIL_ONCE_FILE`) is resumed with
 the same text and token count as an uninterrupted run, an unreachable or failing primary hands
-over to its standby, exhausted retries end the job, and fatal errors are not retried. Build the
+over to its standby, a remote stage with no standby retries its worker, exhausted retries
+end the job, and fatal errors are not retried. Build the
 helpers first:
 
 ```sh
