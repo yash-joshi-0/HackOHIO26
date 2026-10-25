@@ -36,6 +36,9 @@ use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{debug, info, warn};
 
+#[cfg(unix)]
+use std::fs::File;
+
 use crate::config::read_file_limited;
 use crate::node::{NodeId, PeerTable};
 use crate::protocol::{self, CONTROL_ALPN, Heartbeat, Hello, Message, PROTOCOL_VERSION};
@@ -844,7 +847,32 @@ fn save_secret_key(path: &Path, secret_key: &SecretKey) -> std::io::Result<()> {
         options.mode(OWNER_ONLY_MODE);
     }
     let mut file = options.open(path)?;
-    file.write_all(encode_hex(&secret_key.to_bytes()).as_bytes())
+    if let Err(error) = file
+        .write_all(encode_hex(&secret_key.to_bytes()).as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        let _ = sync_parent_dir(path);
+        return Err(error);
+    }
+    drop(file);
+    sync_parent_dir(path)
+}
+
+/// Flushes a newly created identity's directory entry where the platform supports it.
+fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn encode_hex(bytes: &[u8; SECRET_KEY_LEN]) -> String {
@@ -922,6 +950,11 @@ mod tests {
         std::fs::remove_file(&path).expect("remove key");
 
         assert_eq!(created.public(), loaded.public());
+    }
+
+    #[test]
+    fn relative_identity_paths_sync_the_current_directory() {
+        sync_parent_dir(Path::new("worker.key")).expect("sync current directory");
     }
 
     #[test]
