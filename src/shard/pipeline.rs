@@ -21,9 +21,11 @@ use anyhow::{Context, bail, ensure};
 use iroh::endpoint::{Connection, VarInt};
 use iroh::{Endpoint, EndpointId};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::time::{timeout, timeout_at};
 use tracing::{debug, info, warn};
+
+use crate::admission::AdmittedChild as Child;
 
 use crate::protocol::RPC_BRIDGE_ALPN;
 use crate::rpc_bridge::path_kind;
@@ -103,16 +105,18 @@ impl StageLink {
     ) -> anyhow::Result<Self> {
         let label = format!("local stage {}..{}", launch.begin, launch.end);
         let startup_started = Instant::now();
-        let mut child = Command::new(launch.runner)
-            .arg(launch.model)
-            .args(runner_args(launch))
-            .envs(launch.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("failed to start {label} ({})", launch.runner.display()))?;
+        let mut child = Child::spawn(
+            Command::new(launch.runner)
+                .arg(launch.model)
+                .args(runner_args(launch))
+                .envs(launch.env)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true),
+        )
+        .await
+        .with_context(|| format!("failed to start {label} ({})", launch.runner.display()))?;
         let stdin = child.stdin.take().context("runner stdin was not piped")?;
         let stdout = child.stdout.take().context("runner stdout was not piped")?;
         if let Some(stderr) = child.stderr.take() {

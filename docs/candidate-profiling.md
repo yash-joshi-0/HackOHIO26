@@ -13,6 +13,10 @@ It does not implement automatic compute admission. Aarush's measured planner
 remains advisory, and Yash's M-27 ring remains static per launch with leader-local
 stage zero. Connor's response is not required to exercise this local profiler.
 
+The [managed Rust integration](managed-profiling.md) adds process-local admission
+and start/status/cancel controls. The standalone command below remains outside
+that shared owner; its idle confirmation does not coordinate other processes.
+
 ## Run and cancel
 
 After the owner enables compute and a local idle test window is coordinated:

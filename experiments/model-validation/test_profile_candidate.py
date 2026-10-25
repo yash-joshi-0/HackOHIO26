@@ -155,6 +155,9 @@ class CandidateTests(unittest.TestCase):
         report = self.run_profile()
         self.assertEqual(report["status"], "passed", report)
         self.assertEqual(report["completed_steps"], 6)
+        self.assertTrue(report["cleanup_confirmed"])
+        self.assertEqual(report["counters"]["children_started"], 2)
+        self.assertEqual(report["counters"]["children_reaped"], 2)
         self.assertEqual(report["summary"]["decode"]["compute"]["samples"], 4)
         self.assertEqual(len(report["sessions"]), 2)
         self.assertFalse(report["eligible_for_placement"])
@@ -263,6 +266,7 @@ class CandidateTests(unittest.TestCase):
         with patch.object(profiler.Native, "close", side_effect=PermissionError("test cleanup failure")):
             report = self.run_profile()
         self.assertEqual(report["status"], "cleanup_failed")
+        self.assertFalse(report["cleanup_confirmed"])
         self.assertIn("test cleanup failure", report["cleanup_error"])
 
     def test_invalid_state_fixture_prevents_launch(self) -> None:

@@ -225,6 +225,8 @@ class Native:
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, bufsize=0, start_new_session=True)
         self.control, self.limits, self.counters, self.log = control, limits, counters, log
+        self.counters["children_started"] += 1
+        self.reaped = False
         self.buffer = bytearray()
         self.stderr = self.process.stderr
         try:
@@ -327,6 +329,9 @@ class Native:
             pass
         self.signal_group(signal.SIGKILL)
         self.process.wait(timeout=2)
+        if not self.reaped:
+            self.counters["children_reaped"] += 1
+            self.reaped = True
         for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
             stream.close()
 
@@ -373,10 +378,12 @@ def distribution(values: list[float]) -> dict[str, Any] | None:
 
 
 def profile(request_path: Path, output: Path,
-            cancel: Callable[[], bool] = lambda: False) -> dict[str, Any]:
+            cancel: Callable[[], bool] = lambda: False, run_id: str | None = None) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=False)
     report = {"schema_version": 1, "kind": "native_candidate_diagnostic",
-              "profile_id": str(uuid.uuid4()), "status": "running", "started_at_unix_ms": time.time_ns() // 1_000_000,
+              "profile_id": str(uuid.UUID(run_id)) if run_id else str(uuid.uuid4()),
+              "status": "running", "started_at_unix_ms": time.time_ns() // 1_000_000,
+              "cleanup_confirmed": False,
               "phase": "validating", "eligible_for_placement": False, "sessions": [], "completed_steps": 0,
               "sequence_count": 1, "reset": "fresh native process per repetition",
               "limitations": ["No shared inference admission or reservations; operator must confirm idle.",
@@ -386,7 +393,7 @@ def profile(request_path: Path, output: Path,
                               "Local native protocol only; no link or mesh deployment measurements."]}
     save(output / "report.json", report)
     control, native = None, None
-    counters = {"wire_bytes": 0, "log_bytes": 0}
+    counters = {"wire_bytes": 0, "log_bytes": 0, "children_started": 0, "children_reaped": 0}
     timings = {phase: {"compute": [], "service": []} for phase in ("prefill", "decode")}
     pins = {}
     last_progress = 0.0
@@ -470,6 +477,8 @@ def profile(request_path: Path, output: Path,
                 report["status"] = "cleanup_failed"
                 report["cleanup_error"] = type(error).__name__ + ": " + str(error)
         report["counters"] = counters
+        report["cleanup_confirmed"] = (counters["children_started"] == counters["children_reaped"]
+                                       and report["status"] != "cleanup_failed")
         report["summary"] = {phase: {name: distribution(values) for name, values in rows.items()}
                              for phase, rows in timings.items()}
         report["finished_at_unix_ms"] = time.time_ns() // 1_000_000
@@ -483,6 +492,7 @@ def main() -> int:
     parser.add_argument("request", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--cancel-file", type=Path)
+    parser.add_argument("--run-id", type=uuid.UUID, help="run identity supplied by the managed runtime")
     parser.add_argument("--confirm-idle", action="store_true",
                         help="confirm owner compute opt-in and an idle, coordinated local test window")
     args = parser.parse_args()
@@ -499,7 +509,8 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     report = profile(args.request, args.output_dir,
-                     lambda: cancelled or (args.cancel_file is not None and args.cancel_file.exists()))
+                     lambda: cancelled or (args.cancel_file is not None and args.cancel_file.exists()),
+                     str(args.run_id) if args.run_id else None)
     print(json.dumps({"profile_id": report["profile_id"], "status": report["status"],
                       "report": str(args.output_dir / "report.json")}))
     return 0 if report["status"] == "passed" else 1

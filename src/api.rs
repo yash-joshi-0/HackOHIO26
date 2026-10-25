@@ -95,6 +95,25 @@ pub async fn serve_api(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     ensure_loopback(config.listen)?;
+    let profiles = match std::env::var_os("LAYERCAKE_PROFILE_CONFIG") {
+        Some(path) => {
+            Some(crate::profiling::ProfileManager::from_file(std::path::Path::new(&path)).await?)
+        }
+        None => None,
+    };
+    serve_api_with_profiles(config, queue, sink, profiles, shutdown).await
+}
+
+/// Same API with an explicitly constructed profiler, for the single-process application host.
+/// The caller must route its native execution through the same admission owner.
+pub async fn serve_api_with_profiles(
+    config: ApiConfig,
+    queue: Arc<JobQueue>,
+    sink: Arc<dyn HistorySink>,
+    profiles: Option<crate::profiling::ProfileManager>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
+    ensure_loopback(config.listen)?;
     let client = reqwest::Client::builder()
         .connect_timeout(UPSTREAM_CONNECT_TIMEOUT)
         .build()
@@ -105,12 +124,15 @@ pub async fn serve_api(
         client,
         upstream_url: format!("http://{}{CHAT_COMPLETIONS_PATH}", config.upstream),
     });
-    let router = Router::new()
+    let mut router = Router::new()
         .route(WEB_CLIENT_PATH, get(web_client))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions))
         .route(JOBS_PATH, get(list_jobs))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(state);
+    if let Some(profiles) = &profiles {
+        router = router.merge(profiles.router());
+    }
     let listener = TcpListener::bind(config.listen)
         .await
         .with_context(|| format!("failed to bind api listener on {}", config.listen))?;
@@ -118,10 +140,14 @@ pub async fn serve_api(
         .local_addr()
         .context("failed to read api listener address")?;
     info!(listen = %local, upstream = %config.upstream, "api listening");
-    axum::serve(listener, router)
+    let result = axum::serve(listener, router)
         .with_graceful_shutdown(shutdown)
         .await
-        .context("api server failed")
+        .context("api server failed");
+    if let Some(profiles) = profiles {
+        profiles.shutdown().await?;
+    }
+    result
 }
 
 async fn web_client() -> Html<&'static str> {

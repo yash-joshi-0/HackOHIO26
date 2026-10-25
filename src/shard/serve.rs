@@ -25,11 +25,13 @@ use iroh::Endpoint;
 use iroh::endpoint::{Connection, Incoming, RecvStream, SendStream, VarInt};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdin, Command};
+use tokio::process::{ChildStderr, ChildStdin, Command};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::{JoinError, JoinSet};
 use tokio::time::timeout;
 use tracing::{error, info, warn};
+
+use crate::admission::AdmittedChild as Child;
 
 use crate::protocol::RPC_BRIDGE_ALPN;
 use crate::rpc_bridge::{PEER_NOT_APPROVED, PEER_NOT_APPROVED_REASON, PeerAllowlist};
@@ -215,25 +217,27 @@ impl Shard {
     }
 
     /// Starts a runner for this stage with piped stdio; it is killed if the handle is dropped.
-    fn spawn_runner(&self) -> anyhow::Result<Child> {
+    async fn spawn_runner(&self) -> anyhow::Result<Child> {
         let config = &self.config;
-        Command::new(&config.runner)
-            .arg(&config.model)
-            .args([
-                config.begin.to_string(),
-                config.end.to_string(),
-                config.context.to_string(),
-                config.gpu_layers.to_string(),
-                config.budget_bytes.to_string(),
-                PLACEHOLDER_PROMPT.to_owned(),
-                RETURN_LOGITS_OFF.to_owned(),
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("failed to start shard runner {}", config.runner.display()))
+        Child::spawn(
+            Command::new(&config.runner)
+                .arg(&config.model)
+                .args([
+                    config.begin.to_string(),
+                    config.end.to_string(),
+                    config.context.to_string(),
+                    config.gpu_layers.to_string(),
+                    config.budget_bytes.to_string(),
+                    PLACEHOLDER_PROMPT.to_owned(),
+                    RETURN_LOGITS_OFF.to_owned(),
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true),
+        )
+        .await
+        .with_context(|| format!("failed to start shard runner {}", config.runner.display()))
     }
 }
 
@@ -358,7 +362,7 @@ async fn run_session(
     send: &mut SendStream,
     recv: &mut RecvStream,
 ) -> anyhow::Result<ExitStatus> {
-    let mut runner = shard.spawn_runner()?;
+    let mut runner = shard.spawn_runner().await?;
     let mut logs = JoinSet::new();
     if let Some(stderr) = runner.stderr.take() {
         logs.spawn(forward_stderr(stderr, runner.id()));

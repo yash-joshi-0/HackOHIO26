@@ -16,10 +16,12 @@ use std::time::Duration;
 use anyhow::{Context, anyhow, bail};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
+
+use crate::admission::AdmittedChild as Child;
 
 /// `tracing` target for lines a child writes to stdout or stderr.
 const CHILD_LOG_TARGET: &str = "child";
@@ -262,7 +264,10 @@ impl Supervisor {
 
     /// Spawns the child and waits for readiness. `Ok(None)` means shutdown was requested.
     async fn start_once(&mut self) -> anyhow::Result<Option<Child>> {
-        let mut child = spawn_child(&self.spec)?;
+        let mut child = tokio::select! {
+            child = spawn_child(&self.spec) => child?,
+            _ = &mut self.stop => return Ok(None),
+        };
         self.set_pid(child.id());
         let ready = tokio::select! {
             ready = wait_ready(&self.spec, &mut child) => Some(ready),
@@ -289,15 +294,17 @@ impl Supervisor {
 }
 
 /// Starts the program with piped output forwarded to tracing; the child dies with its handle.
-fn spawn_child(spec: &ChildSpec) -> anyhow::Result<Child> {
-    let mut child = Command::new(&spec.program)
-        .args(&spec.args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("failed to start {} ({})", spec.name, spec.program.display()))?;
+async fn spawn_child(spec: &ChildSpec) -> anyhow::Result<Child> {
+    let mut child = Child::spawn(
+        Command::new(&spec.program)
+            .args(&spec.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true),
+    )
+    .await
+    .with_context(|| format!("failed to start {} ({})", spec.name, spec.program.display()))?;
     if let Some(stdout) = child.stdout.take() {
         tokio::spawn(forward_lines(spec.name.clone(), "stdout", stdout));
     }
