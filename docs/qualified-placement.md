@@ -116,9 +116,21 @@ or fleet epochs are added here.
 
 ## Existing native diagnostics
 
-Native candidate diagnostic v1 is a different producer schema. Importers must
-check its exact kind/version and preserve all sessions, samples, outcomes and
-provenance. A passed status or renaming the schema cannot grant eligibility.
+Native candidate diagnostic v1 is a different producer schema. Preserve it with
+the bounded importer before reviewing or transforming observations:
+
+```sh
+llm-cluster import-native-diagnostic --report report.json --samples samples.jsonl \
+  > diagnostic-import.json
+```
+
+The importer checks the exact kind/version and false eligibility flag, hashes
+the exact report and sample bytes, and retains the complete report plus every
+sample row in order. It preserves failed, canceled, running and incomplete
+outcomes; malformed or oversized input fails without a partial import. The
+versioned result is diagnostic-only and is not an `EvidenceRequest` or
+`RangeEvidence`. A passed status or renaming the schema cannot grant
+eligibility.
 The current producer lacks independently established effective-backend evidence,
 complete physical-pool load/inference accounting and sampled power/thermal data.
 Leave those fields unknown until collected and verified. Native configuration

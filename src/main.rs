@@ -122,6 +122,15 @@ enum Command {
     },
     /// Check version 2 evidence and print an advisory ring plan with exclusions.
     QualifiedPlan { evidence: PathBuf },
+    /// Preserve a native candidate diagnostic and its samples without qualifying it.
+    ImportNativeDiagnostic {
+        /// Native candidate diagnostic report.json (schema v1).
+        #[arg(long)]
+        report: PathBuf,
+        /// Matching samples.jsonl from the same profile run.
+        #[arg(long)]
+        samples: PathBuf,
+    },
     /// Print a qualified advisory envelope containing real ring configurations; no launch.
     PrepareQualifiedRing {
         evidence: PathBuf,
@@ -525,6 +534,23 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }
+        Command::ImportNativeDiagnostic { report, samples } => {
+            let report = read_bounded_bytes(
+                &report,
+                llm_cluster::native_diagnostic::MAX_REPORT_BYTES,
+                "native diagnostic report",
+            )?;
+            let samples = read_bounded_bytes(
+                &samples,
+                llm_cluster::native_diagnostic::MAX_SAMPLES_BYTES,
+                "native diagnostic samples",
+            )?;
+            let imported = llm_cluster::native_diagnostic::import_native_candidate_diagnostic(
+                &report, &samples,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&imported)?);
+            Ok(())
+        }
         Command::PrepareQualifiedRing { evidence, registry } => {
             let result = llm_cluster::qualified_placement::prepare_ring(
                 &read_ring_json(&evidence)?,
@@ -823,6 +849,20 @@ fn read_ring_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result
     file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() as u64 <= MAX_BYTES, "ring input exceeds 8 MiB");
     serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
+}
+
+fn read_bounded_bytes(path: &Path, max_bytes: usize, label: &str) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let max_bytes = max_bytes as u64;
+    let mut bytes = Vec::new();
+    file.take(max_bytes + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= max_bytes,
+        "{label} exceeds {} MiB",
+        max_bytes / (1024 * 1024)
+    );
+    Ok(bytes)
 }
 
 /// A half-open layer range `[begin, end)` given as `BEGIN:END`.

@@ -9,6 +9,7 @@ pub mod launch;
 pub mod leader;
 pub mod measured_placement;
 pub mod mesh;
+pub mod native_diagnostic;
 pub mod network;
 pub mod node;
 pub mod placement;
