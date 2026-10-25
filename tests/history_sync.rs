@@ -287,6 +287,19 @@ fn election_is_deterministic() {
 }
 
 #[test]
+fn election_stops_when_epoch_counter_is_exhausted() {
+    let candidate = Candidate {
+        id: id(1),
+        epoch: u64::MAX,
+        history_epoch: u64::MAX,
+        len: 10,
+        connected_at_unix_ms: 0,
+    };
+
+    assert_eq!(elect(&[candidate]), None);
+}
+
+#[test]
 fn messages_round_trip_through_wire_format() {
     let mut leader = Leader::new(id(7), 3, Default::default(), [id(1), id(2)]);
     for (_, msg) in leader.complete_task("job-0", "hello", "world") {

@@ -197,6 +197,33 @@ fn replace_discards_the_old_history() {
 }
 
 #[test]
+fn replace_returns_error_when_snapshot_generation_is_exhausted() {
+    let dir = DataDir::new("generation-exhausted");
+    drop(HistoryStore::open(&dir.0, meta()).unwrap());
+
+    let snapshot_path = dir
+        .0
+        .join("history")
+        .join(CONVERSATION)
+        .join("snapshot.json");
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+    snapshot["generation"] = serde_json::json!(u64::MAX);
+    fs::write(&snapshot_path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+
+    let mut store = HistoryStore::load(&dir.0, CONVERSATION).unwrap();
+    let replacement = History::from_entries(job(1));
+    assert!(matches!(
+        store.replace(&replacement, 1),
+        Err(StoreError::GenerationExhausted { .. })
+    ));
+    assert!(
+        store.is_empty(),
+        "failed replacement must leave memory unchanged"
+    );
+}
+
+#[test]
 fn opening_with_another_model_or_cluster_is_refused() {
     let dir = DataDir::new("mismatch");
     HistoryStore::open(&dir.0, meta()).unwrap();

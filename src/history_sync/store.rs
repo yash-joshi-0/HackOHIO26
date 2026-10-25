@@ -152,6 +152,8 @@ pub enum StoreError {
         stored: BTreeMap<String, String>,
         expected: BTreeMap<String, String>,
     },
+    #[error("{path}: snapshot generation counter is exhausted")]
+    GenerationExhausted { path: PathBuf },
     #[error("no stored conversation at {0}")]
     NotFound(PathBuf),
     #[error("{path}: format version {found} is not supported (expected {FORMAT_VERSION})")]
@@ -382,7 +384,12 @@ impl HistoryStore {
     pub fn replace(&mut self, history: &History, epoch: Epoch) -> Result<(), StoreError> {
         // Write the new snapshot under a new generation first: until the log is truncated,
         // its old lines carry the previous generation and are ignored on load.
-        let generation = self.generation + 1;
+        let generation =
+            self.generation
+                .checked_add(1)
+                .ok_or_else(|| StoreError::GenerationExhausted {
+                    path: self.dir.join(SNAPSHOT_FILE),
+                })?;
         let epoch = epoch.max(self.epoch);
         self.write_snapshot(generation, epoch, history)?;
         self.truncate_log()?;
