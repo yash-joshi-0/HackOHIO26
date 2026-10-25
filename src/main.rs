@@ -122,6 +122,28 @@ enum Command {
         /// Versioned JSON with fresh range, link and memory observations.
         profile: PathBuf,
     },
+    /// Check version 2 evidence and print an advisory ring plan with exclusions.
+    QualifiedPlan { evidence: PathBuf },
+    /// Preserve a native candidate diagnostic and its samples without qualifying it.
+    ImportNativeDiagnostic {
+        /// Native candidate diagnostic report.json (schema v1).
+        #[arg(long)]
+        report: PathBuf,
+        /// samples.jsonl supplied by the caller; same-run pairing is not verified.
+        #[arg(long)]
+        samples: PathBuf,
+    },
+    /// Print a qualified advisory envelope containing real ring configurations; no launch.
+    PrepareQualifiedRing {
+        evidence: PathBuf,
+        registry: PathBuf,
+    },
+    /// Revalidate the entire qualified envelope and its separate freshness limits.
+    ValidateQualifiedRing {
+        deployment: PathBuf,
+        evidence: PathBuf,
+        registry: PathBuf,
+    },
     /// Prepare an EXPERIMENTAL ring manifest and worker arguments from measured ranges.
     /// Does not launch, reserve capacity, or qualify diagnostic measurements.
     PrepareRing {
@@ -543,6 +565,54 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }
+        Command::QualifiedPlan { evidence } => {
+            let input = read_ring_json(&evidence)?;
+            let result = llm_cluster::qualified_placement::plan_ring(&input, current_unix_ms()?)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::ImportNativeDiagnostic { report, samples } => {
+            let report = read_bounded_bytes(
+                &report,
+                llm_cluster::native_diagnostic::MAX_REPORT_BYTES,
+                "native diagnostic report",
+            )?;
+            let samples = read_bounded_bytes(
+                &samples,
+                llm_cluster::native_diagnostic::MAX_SAMPLES_BYTES,
+                "native diagnostic samples",
+            )?;
+            let imported = llm_cluster::native_diagnostic::import_native_candidate_diagnostic(
+                &report, &samples,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&imported)?);
+            Ok(())
+        }
+        Command::PrepareQualifiedRing { evidence, registry } => {
+            let result = llm_cluster::qualified_placement::prepare_ring(
+                &read_ring_json(&evidence)?,
+                &read_ring_json(&registry)?,
+                current_unix_ms()?,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::ValidateQualifiedRing {
+            deployment,
+            evidence,
+            registry,
+        } => {
+            llm_cluster::qualified_placement::validate_deployment(
+                &read_ring_json(&deployment)?,
+                &read_ring_json(&evidence)?,
+                &read_ring_json(&registry)?,
+                current_unix_ms()?,
+            )?;
+            println!(
+                "{{\"evidence_consistent\":true,\"hardware_attested\":false,\"activation_ready\":false}}"
+            );
+            Ok(())
+        }
         Command::PrepareRing {
             profile,
             registry,
@@ -842,6 +912,20 @@ fn read_ring_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result
     file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() as u64 <= MAX_BYTES, "ring input exceeds 8 MiB");
     serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
+}
+
+fn read_bounded_bytes(path: &Path, max_bytes: usize, label: &str) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let max_bytes = max_bytes as u64;
+    let mut bytes = Vec::new();
+    file.take(max_bytes + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= max_bytes,
+        "{label} exceeds {} MiB",
+        max_bytes / (1024 * 1024)
+    );
+    Ok(bytes)
 }
 
 /// A half-open layer range `[begin, end)` given as `BEGIN:END`.

@@ -1,0 +1,2 @@
+{"repetition":0,"step":0,"position":0,"n":8,"phase":"prefill","elapsed_ms":105.0,"compute_ms":80.0,"service_ms":82.0,"observed_peak_buffer_bytes":1048576,"max_rss_bytes":4194304,"vm":{"rss_bytes":4194304},"correctness":{"passed":true,"max_abs_error":0.00001,"values_outside_tolerance":0}}
+{"repetition":0,"step":1,"position":8,"n":1,"phase":"decode","elapsed_ms":110.0,"compute_ms":4.5,"service_ms":5.0,"observed_peak_buffer_bytes":1048576,"max_rss_bytes":4194304,"vm":{"rss_bytes":4194304},"correctness":{"passed":true,"max_abs_error":0.00002,"values_outside_tolerance":0}}

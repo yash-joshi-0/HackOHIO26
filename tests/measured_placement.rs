@@ -200,7 +200,7 @@ fn rejects_stale_available_capacity() {
     assert_eq!(plan(&input), Err(MeasuredError::NoFeasiblePlacement));
 
     let mut input = request();
-    input.peers[1].available_bytes = memory(119);
+    input.peers[1].available_bytes = memory(99);
     assert_eq!(plan(&input), Err(MeasuredError::NoFeasiblePlacement));
 }
 
