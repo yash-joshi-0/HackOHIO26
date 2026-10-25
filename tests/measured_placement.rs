@@ -229,6 +229,16 @@ fn rejects_ambiguous_or_malformed_profiles() {
     input.workload.model_sha256 = "not-a-sha256".into();
     assert!(matches!(plan(&input), Err(MeasuredError::InvalidInput(_))));
 
+    for (context_tokens, batch_tokens) in [(31, 1), (4097, 1), (512, 129), (32, 33)] {
+        let mut input = request();
+        input.workload.context_tokens = context_tokens;
+        input.workload.batch_tokens = batch_tokens;
+        assert!(
+            matches!(plan(&input), Err(MeasuredError::InvalidInput(_))),
+            "accepted context={context_tokens}, batch={batch_tokens}"
+        );
+    }
+
     let mut input = request();
     input.links.push(input.links[0].clone());
     assert!(matches!(plan(&input), Err(MeasuredError::InvalidInput(_))));

@@ -1,6 +1,8 @@
 //! Advisory placement from exact range and directed-link observations.
 //! This path does not convert range timings into fictitious per-layer costs.
 
+use crate::shard::manifest::MIN_CONTEXT;
+use crate::shard::wire::{MAX_BATCH_TOKENS, MAX_CONTEXT};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -190,8 +192,10 @@ fn plan_with_topology(
         || request.workload.runtime_id.is_empty()
         || request.workload.layers == 0
         || request.workload.layers > MAX_LAYERS
-        || request.workload.context_tokens == 0
+        || !(MIN_CONTEXT..=MAX_CONTEXT).contains(&request.workload.context_tokens)
         || request.workload.batch_tokens == 0
+        || request.workload.batch_tokens > MAX_BATCH_TOKENS
+        || request.workload.batch_tokens > request.workload.context_tokens
         || request.workload.activation_payload_bytes == 0
         || request.workload.control_payload_bytes == 0
         || request.origin_peer_id.is_empty()

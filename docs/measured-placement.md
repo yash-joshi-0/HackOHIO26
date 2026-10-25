@@ -31,7 +31,8 @@ observation and identity before drawing a hardware conclusion.
 
 The [fixture](../examples/measured-placement-profile.json) shows every field.
 `workload` pins the full model source hash, exact runtime/build identity,
-context, batch, layer count and payload sizes. Every range and link observation
+context (32–4096 tokens), batch (1–128 tokens, no larger than context), layer
+count and payload sizes. Every range and link observation
 repeats that identity; a mismatch makes that observation ineligible. Give each
 observation a stable `profile_id` and its measurement time. `observed_at_unix_ms`
 and `max_profile_age_ms` reject old or future observations. A real request
