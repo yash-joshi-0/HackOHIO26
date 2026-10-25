@@ -5,6 +5,10 @@ from the actual device and executed runtime. Leave unknown values as **not
 measured**; a device name or installed RAM figure does not establish a safe
 contribution budget.
 
+For a bounded local native range test with pinned correctness fixtures and
+cancellation, see [candidate profiling](candidate-profiling.md). Its diagnostic
+output does not establish complete capacity accounting or placement eligibility.
+
 ## One record per device, model, runtime and operating mode
 
 | Field | Observation to record |

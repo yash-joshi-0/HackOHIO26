@@ -24,6 +24,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --check
+      - name: Native profiling diagnostics
+        if: matrix.os != 'windows-latest'
+        run: python3 -m unittest discover -s experiments/model-validation -p 'test_*.py' -v
       - name: Clippy
         if: matrix.os != 'windows-latest'
         run: cargo clippy --all-targets -- -D warnings
