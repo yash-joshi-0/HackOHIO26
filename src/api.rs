@@ -7,8 +7,7 @@
 //! the [`HistorySink`]. A streamed reply completes only after a valid `[DONE]` terminator;
 //! truncated, malformed or error-bearing SSE fails the job without committing history.
 //! The sink sees each running job's lifecycle: `started` when it gets the permit, then either
-//! `record` with the completed turn or `ended` with [`TurnOutcome::Failed`] or
-//! [`TurnOutcome::Canceled`].
+//! `record` with the completed turn or `ended` with a [`TurnOutcome`].
 //! `GET /jobs` lists job states and `GET /peers` lists peers with authenticated control links.
 
 use std::future::Future;
@@ -468,8 +467,9 @@ fn relay_stream(upstream: reqwest::Response, finish: JobFinish) -> Response {
 
 /// Owns a running job's permit until its reply is fully delivered, and reports the job's
 /// lifecycle to the history sink: `started` on creation, then exactly one of `record`
-/// ([`complete`](Self::complete)), `ended(Failed)` ([`fail`](Self::fail)), or `ended(Canceled)`
-/// when dropped unfinished because the client went away.
+/// ([`complete`](Self::complete)) or `ended` for failure, cancellation, or a successful response
+/// too large to retain ([`fail`](Self::fail), [`complete_without_history`](Self::complete_without_history),
+/// or drop).
 ///
 /// The sink is told before the permit is released, so its calls for this job finish before the
 /// next queued job can start.
@@ -510,6 +510,25 @@ impl JobFinish {
         permit.complete();
     }
 
+    /// Completes the job but avoids retaining a response larger than the history limit.
+    fn complete_without_history(mut self) {
+        let Some(permit) = self.permit.take() else {
+            return;
+        };
+        warn!(
+            request_id = self.request_id(),
+            limit_bytes = MAX_HISTORY_RESPONSE_BYTES,
+            "job completed but response was too large to retain in history"
+        );
+        self.sink.ended(
+            self.request_id(),
+            TurnOutcome::CompletedWithoutHistory {
+                limit_bytes: MAX_HISTORY_RESPONSE_BYTES,
+            },
+        );
+        permit.complete();
+    }
+
     /// Reports the failure to the history sink, then fails the job with the same reason.
     fn fail(mut self, reason: String) {
         let Some(permit) = self.permit.take() else {
@@ -534,16 +553,6 @@ impl Drop for JobFinish {
         self.sink.ended(self.request_id(), TurnOutcome::Canceled);
         // Dropping the permit without an outcome marks the job canceled and frees the slot.
         drop(permit);
-    }
-
-    /// Completes the request without retaining an oversized response in conversation history.
-    fn complete_without_history(self) {
-        warn!(
-            request_id = self.permit.request_id(),
-            limit_bytes = MAX_HISTORY_RESPONSE_BYTES,
-            "job completed but response was too large to retain in history"
-        );
-        self.permit.complete();
     }
 }
 
@@ -833,6 +842,36 @@ mod tests {
             ]
         );
         assert_eq!(queue.jobs()[0].status, JobStatus::Canceled);
+    }
+
+    #[tokio::test]
+    async fn completed_response_without_history_reports_terminal_outcome() {
+        let queue = JobQueue::new();
+        let sink = Arc::new(RecordingSink::default());
+        let permit = queue.acquire(None).await;
+        let request_id = permit.request_id().to_owned();
+        let turn = StartedTurn {
+            request_id: request_id.clone(),
+            conversation_id: None,
+            request: json!({}),
+        };
+        let finish = JobFinish::start(permit, turn, sink.clone());
+
+        finish.complete_without_history();
+
+        assert_eq!(queue.jobs()[0].status, JobStatus::Completed);
+        assert_eq!(
+            *sink.hooks(),
+            [
+                Hook::Started(request_id.clone()),
+                Hook::Ended(
+                    request_id,
+                    TurnOutcome::CompletedWithoutHistory {
+                        limit_bytes: MAX_HISTORY_RESPONSE_BYTES,
+                    }
+                ),
+            ]
+        );
     }
 
     #[tokio::test]

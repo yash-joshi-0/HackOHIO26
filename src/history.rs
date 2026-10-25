@@ -1,9 +1,9 @@
 //! Hooks for a job's conversation turn, consumed by history storage and sync.
 //!
 //! The API reports every job that reaches the run slot to a [`HistorySink`]: `started` when it
-//! is dequeued, then either `record` with the completed turn or `ended` when it fails or is
-//! canceled. Only a logging sink ships here; persistent storage and replication plug in behind
-//! the same trait (M-9, M-10).
+//! is dequeued, then either `record` with the completed turn or `ended` with its terminal outcome
+//! (failure, cancellation, or successful completion without history retention). Only a logging
+//! sink ships here; persistent storage and replication plug in behind the same trait (M-9, M-10).
 
 use serde_json::Value;
 use tracing::info;
@@ -36,7 +36,7 @@ pub struct CompletedTurn {
     pub response_text: String,
 }
 
-/// How a started job ended without a committed reply.
+/// A started job's terminal outcome when its reply is not retained in history.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TurnOutcome {
     /// Upstream error, non-2xx reply, or an invalid or truncated reply.
@@ -46,6 +46,11 @@ pub enum TurnOutcome {
     },
     /// The client went away while the job was running.
     Canceled,
+    /// The request succeeded, but its assistant response exceeded the history retention limit.
+    CompletedWithoutHistory {
+        /// Maximum assistant response size retained by the API.
+        limit_bytes: usize,
+    },
 }
 
 /// Receives a job's lifecycle. For every job that acquires the run slot, [`started`] is called
@@ -68,8 +73,8 @@ pub trait HistorySink: Send + Sync {
     /// reply, and never together with [`ended`](HistorySink::ended) for the same job.
     fn record(&self, turn: CompletedTurn);
 
-    /// Called once when a started job fails or is canceled instead of completing; never after
-    /// [`record`](HistorySink::record). Default: no-op.
+    /// Called once when a started job fails, is canceled, or completes without history retention;
+    /// never after [`record`](HistorySink::record). Default: no-op.
     fn ended(&self, _request_id: &str, _outcome: TurnOutcome) {}
 }
 
@@ -110,6 +115,12 @@ impl HistorySink for LoggingHistorySink {
                 info!(target: "history", request_id, %reason, "failed turn");
             }
             TurnOutcome::Canceled => info!(target: "history", request_id, "canceled turn"),
+            TurnOutcome::CompletedWithoutHistory { limit_bytes } => info!(
+                target: "history",
+                request_id,
+                limit_bytes,
+                "completed turn omitted from history"
+            ),
         }
     }
 }
