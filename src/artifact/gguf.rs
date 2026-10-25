@@ -213,6 +213,7 @@ mod tests {
         input.set_len(MAX_HEADER)?;
         input.seek(SeekFrom::Start(MAX_HEADER - 8))?;
         input.write_all(&1u64.to_le_bytes())?;
+        input.seek(SeekFrom::Start(MAX_HEADER - 8))?;
 
         let mut header = Header {
             input: BufReader::new(input),
