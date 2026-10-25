@@ -129,19 +129,25 @@ pub fn decode(bytes: &[u8]) -> Result<Message, ProtocolError> {
 
 /// Writes one frame: a `u32` big-endian length prefix followed by the encoded message.
 ///
-/// Rejects messages whose encoding is larger than [`MAX_FRAME_LEN`] without writing anything.
+/// Rejects messages whose encoding is larger than [`MAX_FRAME_LEN`] without allocating the
+/// encoded payload or writing anything.
 pub async fn write_frame<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &Message,
 ) -> Result<(), ProtocolError> {
-    let payload = encode(message)?;
-    let len = payload.len();
-    if len > MAX_FRAME_LEN {
+    // Measure first: `encode` allocates a `Vec`, so doing this after encoding would let an
+    // oversized activation/history payload allocate far beyond the transport's frame limit.
+    let encoded_len =
+        postcard::experimental::serialized_size(message).map_err(ProtocolError::Encode)?;
+    if encoded_len > MAX_FRAME_LEN {
         return Err(ProtocolError::FrameTooLarge {
-            len,
+            len: encoded_len,
             limit: MAX_FRAME_LEN,
         });
     }
+    let payload = encode(message)?;
+    let len = payload.len();
+    debug_assert_eq!(len, encoded_len);
     let prefix = u32::try_from(len).map_err(|_| ProtocolError::FrameTooLarge {
         len,
         limit: MAX_FRAME_LEN,
@@ -345,8 +351,9 @@ mod tests {
         });
         let mut written = Vec::new();
         let error = write_frame(&mut written, &message).await.unwrap_err();
+        let encoded_len = postcard::experimental::serialized_size(&message).unwrap();
         assert!(
-            matches!(error, ProtocolError::FrameTooLarge { len, limit: MAX_FRAME_LEN } if len > MAX_FRAME_LEN),
+            matches!(error, ProtocolError::FrameTooLarge { len, limit: MAX_FRAME_LEN } if len == encoded_len && len > MAX_FRAME_LEN),
             "unexpected error: {error}"
         );
         assert!(written.is_empty());
