@@ -135,8 +135,9 @@ The exact DP minimizes predicted sequential decode time while choosing both a
 directed peer order and contiguous layer ranges, subject to per-device memory
 budgets and the minimum contributor count. It tracks the selected peer subset,
 last peer and completed layer prefix. Missing directed links make transitions
-infeasible. To keep exact search bounded, at most eight eligible peers are
-accepted. Integer overflow and malformed identities/profiles fail explicitly.
+infeasible. To keep the dense exact-search state table bounded, at most eight
+eligible peers and 256 layers are accepted. Integer overflow and malformed
+identities/profiles fail explicitly.
 
 The current objective is sequential decode latency: measured per-layer decode
 times plus measured per-token transfer overhead for each selected directed link.

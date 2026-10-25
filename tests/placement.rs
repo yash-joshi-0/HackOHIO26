@@ -161,6 +161,25 @@ fn detects_bad_profiles_and_arithmetic_overflow() {
 }
 
 #[test]
+fn rejects_layer_counts_that_would_make_dense_search_unbounded() {
+    let mut large_model = model();
+    large_model.layers = vec![
+        LayerMemory {
+            weight_bytes: 1,
+            kv_bytes_per_token: 0,
+        };
+        257
+    ];
+
+    assert_eq!(
+        plan(&large_model, &[], &[], 1),
+        Err(PlanError::InvalidInput(
+            "exact placement search supports at most 256 layers".into()
+        ))
+    );
+}
+
+#[test]
 fn matches_exhaustive_two_peer_boundary_search() {
     for budget_a in [170, 290, 410, 530] {
         for budget_b in [170, 290, 410, 530] {

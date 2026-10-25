@@ -6,6 +6,8 @@ use std::ops::Range;
 
 /// Maximum eligible peers in the exact joint order-and-range search.
 const MAX_SEARCH_PEERS: usize = 8;
+/// Dense search states grow with layer count; keep their allocation bounded.
+const MAX_SEARCH_LAYERS: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -134,6 +136,11 @@ pub fn plan_with_final_peer(
     {
         return Err(invalid(
             "model identity, context, layers and min_peers must be nonempty",
+        ));
+    }
+    if n > MAX_SEARCH_LAYERS {
+        return Err(invalid(
+            "exact placement search supports at most 256 layers",
         ));
     }
     let mut ids = HashSet::new();
