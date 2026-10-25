@@ -29,6 +29,8 @@ local to the device that owns them; a peer's loopback URL is not a remote route.
 Attach an existing inference backend with `--upstream 127.0.0.1:PORT`.
 Chat requests use the core's FIFO queue and streaming relay. Without membership
 and a responding backend, inference returns HTTP 503 with an OpenAI-style error.
+The optional top-level `conversation_id` is removed before forwarding and is
+limited to 256 UTF-8 bytes because recent job records retain it.
 A listening API does not mean a loaded model or an executable distributed plan.
 Readiness checks backend `/health`; model IDs come from its `/v1/models`.
 The API does not launch workers, choose a model, or download weights.

@@ -49,6 +49,9 @@ pub const WEB_CLIENT_PATH: &str = "/";
 /// Optional top-level request field naming the conversation; never forwarded upstream.
 pub const CONVERSATION_ID_FIELD: &str = "conversation_id";
 
+/// Maximum UTF-8 byte length retained for a conversation ID in recent job records.
+const MAX_CONVERSATION_ID_BYTES: usize = 256;
+
 /// Response header carrying the job's request ID, so clients can find it in `GET /jobs`.
 pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
@@ -321,7 +324,12 @@ fn parse_chat_request(body: &[u8]) -> Result<(Value, Option<String>), String> {
     };
     let conversation_id = match fields.remove(CONVERSATION_ID_FIELD) {
         None | Some(Value::Null) => None,
-        Some(Value::String(id)) => Some(id),
+        Some(Value::String(id)) if id.len() <= MAX_CONVERSATION_ID_BYTES => Some(id),
+        Some(Value::String(_)) => {
+            return Err(format!(
+                "{CONVERSATION_ID_FIELD} must be at most {MAX_CONVERSATION_ID_BYTES} bytes"
+            ));
+        }
         Some(_) => return Err(format!("{CONVERSATION_ID_FIELD} must be a string")),
     };
     Ok((request, conversation_id))
@@ -930,6 +938,21 @@ mod tests {
         assert!(parse_chat_request(b"not json").is_err());
         assert!(parse_chat_request(b"[1, 2]").is_err());
         assert!(parse_chat_request(br#"{"conversation_id": 7}"#).is_err());
+    }
+
+    #[test]
+    fn conversation_id_length_is_bounded_in_utf8_bytes() {
+        let request = |id: &str| {
+            serde_json::to_vec(&json!({"conversation_id": id})).expect("request serializes")
+        };
+
+        assert!(parse_chat_request(&request(&"x".repeat(MAX_CONVERSATION_ID_BYTES))).is_ok());
+        let error = parse_chat_request(&request(&"x".repeat(MAX_CONVERSATION_ID_BYTES + 1)))
+            .expect_err("oversized conversation IDs must not be retained");
+        assert!(error.contains("256 bytes"));
+        assert!(
+            parse_chat_request(&request(&"é".repeat(MAX_CONVERSATION_ID_BYTES / 2 + 1))).is_err()
+        );
     }
 
     #[test]

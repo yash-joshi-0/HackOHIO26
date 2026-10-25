@@ -630,6 +630,12 @@ async fn malformed_requests_are_rejected_without_a_job() {
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
     assert!(api.jobs().await.is_empty());
+
+    let response = api
+        .post_chat(&json!({"messages": [], "conversation_id": "x".repeat(257)}))
+        .await;
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert!(api.jobs().await.is_empty());
     api.stop().await;
 }
 
