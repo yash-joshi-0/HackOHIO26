@@ -424,12 +424,20 @@ async fn http_ok(addr: SocketAddr, path: &str) -> std::io::Result<bool> {
 }
 
 fn is_ok_status_line(line: &[u8]) -> bool {
-    let line = String::from_utf8_lossy(line);
-    let mut parts = line.split_ascii_whitespace();
-    matches!(
-        (parts.next(), parts.next()),
-        (Some(version), Some("200")) if version.starts_with("HTTP/1.")
-    )
+    let Some(line) = line.strip_suffix(b"\r\n") else {
+        return false;
+    };
+    let Ok(line) = std::str::from_utf8(line) else {
+        return false;
+    };
+    let mut parts = line.splitn(3, ' ');
+    let (Some(version), Some(status)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    version
+        .strip_prefix("HTTP/1.")
+        .is_some_and(|minor| minor.len() == 1 && minor.as_bytes()[0].is_ascii_digit())
+        && status == "200"
 }
 
 /// Kills the child (if it is still running) and reaps it, so no orphan or zombie is left.
@@ -493,8 +501,13 @@ mod tests {
     fn status_line_must_be_http_200() {
         assert!(is_ok_status_line(b"HTTP/1.1 200 OK\r\n"));
         assert!(is_ok_status_line(b"HTTP/1.0 200\r\n"));
+        assert!(is_ok_status_line(b"HTTP/1.9 200\r\n"));
         assert!(!is_ok_status_line(b"HTTP/1.1 503 Service Unavailable\r\n"));
         assert!(!is_ok_status_line(b"HTTP/1.1 2000 Odd\r\n"));
+        assert!(!is_ok_status_line(b"HTTP/1.1 200 OK"));
+        assert!(!is_ok_status_line(b"HTTP/1.1 200 OK\n"));
+        assert!(!is_ok_status_line(b"HTTP/1.foo 200 OK\r\n"));
+        assert!(!is_ok_status_line(b"HTTP/1.10 200 OK\r\n"));
         assert!(!is_ok_status_line(b"SSH-2.0-OpenSSH 200\r\n"));
         assert!(!is_ok_status_line(b""));
     }
