@@ -521,12 +521,21 @@ mod tests {
         assert!(!is_ok_status_line(b"HTTP/1.1 200 OK"));
         assert!(!is_ok_status_line(b"HTTP/1.1 200 OK\n"));
         assert!(!is_ok_status_line(b""));
+        let oversized = format!(
+            "HTTP/1.1 200 {}\r\n",
+            "x".repeat(MAX_STATUS_LINE_LEN as usize)
+        );
+        assert!(!is_ok_status_line(oversized.as_bytes()));
     }
 
     #[test]
     fn readiness_path_must_be_safe_origin_form() {
         assert!(valid_http_path("/health"));
         assert!(valid_http_path("/health?full=1"));
+        assert!(valid_http_path(&format!(
+            "/{}",
+            "x".repeat(MAX_HTTP_PATH_LEN - 1)
+        )));
         assert!(!valid_http_path("health"));
         assert!(!valid_http_path("/health\r\nX-Injected: yes"));
         assert!(!valid_http_path("/health#fragment"));
