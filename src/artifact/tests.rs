@@ -169,6 +169,20 @@ fn manifests_pin_model_role_range_and_whole_shard_location() {
     assert!(catalog.exact_range(0, 1).is_err());
 }
 
+#[test]
+fn catalog_rejects_multiple_artifacts_for_the_same_range() {
+    let first = manifest(b"first artifact");
+    let second = manifest(b"different artifact");
+    let catalog = Catalog {
+        version: 1,
+        model: first.model.clone(),
+        shards: vec![first, second],
+    };
+
+    assert!(catalog.validate().is_err());
+    assert!(catalog.exact_range(1, 2).is_err());
+}
+
 // A minimal physical GGUF fixture. It tests export metadata and transfer integrity,
 // not native inference or the numerical validity of a model.
 async fn fixture(dir: &Path, peer: crate::mesh::Peer) -> Seed {

@@ -146,12 +146,17 @@ impl Catalog {
         );
         self.model.validate()?;
         let mut hashes = std::collections::BTreeSet::new();
+        let mut ranges = std::collections::BTreeSet::new();
         for shard in &self.shards {
             shard.validate()?;
             ensure!(shard.model == self.model, "catalog mixes model pins");
             ensure!(
                 hashes.insert(&shard.artifact_sha256),
                 "duplicate catalog artifact"
+            );
+            ensure!(
+                ranges.insert((shard.begin, shard.end)),
+                "duplicate catalog layer range"
             );
         }
         Ok(())

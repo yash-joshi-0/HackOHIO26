@@ -43,8 +43,9 @@ The selected catalog must come from the mesh's chosen, trusted seed. The device'
 A manifest carries version, immutable source revision, source SHA-256/bytes,
 architecture, decoder layer count, half-open layer range, first/middle/final/full
 role, artifact SHA-256/bytes, export report hash, and an Iroh or HTTPS location.
-Catalog selection does not create exports or choose an inference placement.
-An unavailable exact range returns an error requiring a proper export.
+Catalog layer ranges must be unique so exact-range selection is independent of
+catalog order. Catalog selection does not create exports or choose an inference
+placement. An unavailable exact range returns an error requiring a proper export.
 
 ## Seed provenance
 
