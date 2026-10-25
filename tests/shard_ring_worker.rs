@@ -839,11 +839,13 @@ async fn upstream_that_stops_reading_fails_the_session_at_the_ready_deadline() {
     );
 
     let job = new_job_id();
-    let stalled = Instant::now();
     let (mut entry, results) = tokio::join!(
         start_unread(&origin, worker.id(), &job),
         accept_results(&origin, worker.id())
     );
+    // The terminal opens this channel only after runner startup; start the write-deadline clock
+    // after that setup so it measures the blocked ready write, not child-process startup.
+    let stalled = Instant::now();
     assert!(!compute_is_idle(), "the session's runner holds a lease");
     expect_session_failed(&results.connection, stalled, SHORT_WRITES.control_line).await;
     expect_reset(&mut entry.recv).await;
