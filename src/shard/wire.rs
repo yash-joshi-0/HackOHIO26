@@ -109,12 +109,20 @@ impl StageInput<'_> {
     }
 
     /// Number of tokens the payload covers, checked to be within `1..=MAX_BATCH_TOKENS` and,
-    /// for hidden rows, to be a whole number of rows.
+    /// for hidden rows, to use a supported `embd` and contain whole rows within the size bound.
     pub fn token_count(&self) -> anyhow::Result<u32> {
         let count = match self {
             Self::Tokens(tokens) => tokens.len(),
             Self::Hidden { rows, embd } => {
-                ensure!(*embd > 0, "hidden rows need a nonzero embd");
+                ensure!(
+                    (1..=MAX_EMBD).contains(embd),
+                    "hidden dimension {embd} outside 1..={MAX_EMBD}"
+                );
+                ensure!(
+                    rows.len() <= MAX_HIDDEN_VALUES,
+                    "{} hidden values exceed the bound of {MAX_HIDDEN_VALUES}",
+                    rows.len()
+                );
                 let embd = *embd as usize;
                 ensure!(
                     rows.len() % embd == 0,
@@ -778,6 +786,7 @@ mod tests {
     #[tokio::test]
     async fn write_request_rejects_bad_batches() {
         let too_many = vec![0u32; MAX_BATCH_TOKENS as usize + 1];
+        let too_wide = vec![0.0f32; MAX_EMBD as usize + 1];
         let cases = [
             StageInput::Tokens(&[]),
             StageInput::Tokens(&too_many),
@@ -788,6 +797,10 @@ mod tests {
             StageInput::Hidden {
                 rows: &[1.0],
                 embd: 0,
+            },
+            StageInput::Hidden {
+                rows: &too_wide,
+                embd: MAX_EMBD + 1,
             },
             StageInput::Hidden { rows: &[], embd: 4 },
         ];
