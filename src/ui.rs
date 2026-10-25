@@ -24,7 +24,10 @@ use std::{
     time::Duration,
 };
 use tokio::io::AsyncReadExt;
-use tokio::{net::TcpListener, sync::Mutex};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, RwLock},
+};
 use tower_http::services::ServeDir;
 use tracing::debug;
 
@@ -55,12 +58,18 @@ struct App {
     queue: Arc<JobQueue>,
     upstream: Option<SocketAddr>,
     client: reqwest::Client,
+    /// Refreshed every two seconds and after mesh commands; request handlers use this snapshot.
+    published_status: RwLock<ApiEndpoint>,
     directory: PathBuf,
     commands: Mutex<()>,
     preferences: Mutex<()>,
 }
 impl App {
     async fn api_status(&self) -> ApiEndpoint {
+        self.published_status.read().await.clone()
+    }
+
+    async fn refresh_api_status(&self) -> ApiEndpoint {
         let member = match mesh_membership(self.node.snapshot().await) {
             Ok(member) => Some(member),
             Err(error) => {
@@ -98,9 +107,9 @@ impl App {
         }
     }
     async fn publish_status(&self) {
-        self.node
-            .set_api_endpoint(Some(self.api_status().await))
-            .await;
+        let status = self.refresh_api_status().await;
+        self.node.set_api_endpoint(Some(status.clone())).await;
+        *self.published_status.write().await = status;
     }
 }
 
@@ -108,6 +117,16 @@ impl App {
 fn mesh_membership(snapshot: Result<Value>) -> Result<bool> {
     snapshot.map(|snapshot| !snapshot["mesh"].is_null())
 }
+
+fn initializing_api_status(origin: &str) -> ApiEndpoint {
+    ApiEndpoint {
+        base_url: format!("{origin}/v1"),
+        scope: "device_local".into(),
+        inference_ready: false,
+        message: "API status is initializing.".into(),
+    }
+}
+
 pub async fn run(options: Options) -> Result<()> {
     if let Some(upstream) = options.upstream {
         ensure!(
@@ -154,9 +173,11 @@ pub async fn run(options: Options) -> Result<()> {
         "Inference upstream cannot be the dashboard itself."
     );
     let node = Node::open(&directory).await?;
+    let origin = format!("http://{local}");
+    let initial_status = initializing_api_status(&origin);
     let app = Arc::new(App {
         node,
-        origin: format!("http://{local}"),
+        origin,
         directory,
         queue: Arc::new(JobQueue::new()),
         upstream: options.upstream,
@@ -164,6 +185,7 @@ pub async fn run(options: Options) -> Result<()> {
             .timeout(Duration::from_secs(1))
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
+        published_status: RwLock::new(initial_status),
         commands: Mutex::new(()),
         preferences: Mutex::new(()),
     });
@@ -503,5 +525,51 @@ mod tests {
         let error = read_preferences_file(&path).await.unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("8192-byte limit"));
+    }
+
+    #[tokio::test]
+    async fn api_status_reads_reuse_the_published_health_check() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::AsyncWriteExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let node = Node::open_local(directory.path()).await.unwrap();
+        node.create("test mesh", "leader").await.unwrap();
+        let health_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let health_addr = health_listener.local_addr().unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let server_requests = requests.clone();
+        let health_server = tokio::spawn(async move {
+            let (mut socket, _) = health_listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            server_requests.fetch_add(1, Ordering::Relaxed);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let origin = "http://127.0.0.1:3210".to_owned();
+        let app = App {
+            node,
+            origin: origin.clone(),
+            queue: Arc::new(JobQueue::new()),
+            upstream: Some(health_addr),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(1))
+                .build()
+                .unwrap(),
+            published_status: RwLock::new(initializing_api_status(&origin)),
+            directory: directory.path().to_owned(),
+            commands: Mutex::new(()),
+            preferences: Mutex::new(()),
+        };
+
+        app.publish_status().await;
+        health_server.await.unwrap();
+        assert!(app.api_status().await.inference_ready);
+        assert!(app.api_status().await.inference_ready);
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        app.node.close().await;
     }
 }
