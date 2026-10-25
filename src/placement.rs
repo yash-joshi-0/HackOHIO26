@@ -7,7 +7,7 @@ use std::ops::Range;
 /// Maximum eligible peers in the exact joint order-and-range search.
 const MAX_SEARCH_PEERS: usize = 8;
 /// Maximum layers in the exact dynamic program's layer-prefix dimension.
-const MAX_SEARCH_LAYERS: usize = 1024;
+const MAX_SEARCH_LAYERS: usize = 128;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -136,7 +136,7 @@ pub fn plan_with_final_peer(
         || min_peers == 0
     {
         return Err(invalid(
-            "model identity, context, layers (1..=1024) and min_peers must be valid",
+            "model identity, context, layers (1..=128) and min_peers must be valid",
         ));
     }
     let mut ids = HashSet::new();

@@ -164,7 +164,7 @@ fn detects_bad_profiles_and_arithmetic_overflow() {
 fn rejects_layer_count_above_exact_search_bound() {
     let mut m = model();
     m.layers.resize(
-        1025,
+        129,
         LayerMemory {
             weight_bytes: 100,
             kv_bytes_per_token: 2,

@@ -136,8 +136,9 @@ directed peer order and contiguous layer ranges, subject to per-device memory
 budgets and the minimum contributor count. It tracks the selected peer subset,
 last peer and completed layer prefix. Missing directed links make transitions
 infeasible. To keep exact search bounded, at most eight eligible peers and
-1024 model layers are accepted. Integer overflow and malformed
-identities/profiles fail explicitly.
+128 model layers are accepted. The range-partition search grows quadratically
+with the layer count. Integer overflow and malformed identities/profiles fail
+explicitly. The separate measured-placement path has its own bounds.
 
 The current objective is sequential decode latency: measured per-layer decode
 times plus measured per-token transfer overhead for each selected directed link.
