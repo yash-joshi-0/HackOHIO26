@@ -459,6 +459,7 @@ pub fn validate_stage(meta: &StageMetadata) -> anyhow::Result<()> {
         "invalid hidden dimension {}",
         meta.embd
     );
+    meta.validate_vocabulary()?;
     let hash = &meta.source_sha256;
     ensure!(
         hash.len() == SHA256_HEX_LEN && hash.bytes().all(|byte| byte.is_ascii_hexdigit()),
@@ -1892,12 +1893,13 @@ mod tests {
 
     #[test]
     fn validate_chain_rejects_invalid_stages() {
-        let invalid: [fn(&mut RingStageInfo); 8] = [
+        let invalid: [fn(&mut RingStageInfo); 9] = [
             |stage| stage.meta.protocol = 2,
             |stage| stage.meta.end = stage.meta.begin,
             |stage| stage.meta.end = stage.meta.layers + 1,
             |stage| stage.meta.embd = 0,
             |stage| stage.meta.embd = MAX_EMBD + 1,
+            |stage| stage.meta.vocab = 0,
             |stage| stage.meta.source_sha256 = String::new(),
             |stage| stage.meta.source_sha256 = "zz".repeat(32),
             |stage| stage.node_id = "not a node id".to_owned(),

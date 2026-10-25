@@ -782,6 +782,8 @@ fn check_metadata(
         "{label} has hidden size {}, but the first stage has {embd}",
         meta.embd
     );
+    meta.validate_vocabulary()
+        .with_context(|| format!("{label} reported invalid vocabulary metadata"))?;
     ensure!(
         meta.is_final() == is_last,
         "{label} is{} the final stage but sits {} the pipeline",

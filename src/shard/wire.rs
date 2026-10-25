@@ -181,6 +181,12 @@ impl StageMetadata {
     pub fn is_final(&self) -> bool {
         self.end == self.layers
     }
+
+    /// Ensures the runner reported a usable vocabulary before inference begins.
+    pub fn validate_vocabulary(&self) -> anyhow::Result<()> {
+        ensure!(self.vocab > 0, "runner reported a zero vocabulary");
+        Ok(())
+    }
 }
 
 /// The JSON line the runner sends for each request.
@@ -809,6 +815,28 @@ mod tests {
             assert!(write_request(&mut out, 0, 0, &input).await.is_err());
             assert!(out.is_empty());
         }
+    }
+
+    #[test]
+    fn rejects_zero_vocabulary_metadata() {
+        let mut metadata = StageMetadata {
+            protocol: 1,
+            begin: 0,
+            end: 1,
+            layers: 1,
+            embd: 1,
+            vocab: 0,
+            allocated_bytes: 0,
+            source_sha256: String::new(),
+            tokens: vec![0],
+            model_sha256: None,
+            artifact_sha256: None,
+            runner_sha256: None,
+            extra: Map::new(),
+        };
+        assert!(metadata.validate_vocabulary().is_err());
+        metadata.vocab = 1;
+        assert!(metadata.validate_vocabulary().is_ok());
     }
 
     #[tokio::test]
