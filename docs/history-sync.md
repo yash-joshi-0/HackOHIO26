@@ -2,7 +2,7 @@
 
 The `history_sync` module (`src/history_sync/`) keeps one conversation's history identical on every node in the mesh and saved on each node's disk. When the main process (the device that took the prompt) disappears, another node can take over from its own copy.
 
-**Status:** works in the in-memory simulator and in tests (31 tests). It is **not yet wired into a running `llm-cluster` node**: nothing reads `History` frames off control connections, so a live node doesn't sync or save history yet. Takeover is a ranking, not consensus, and there is no restore-from-export command yet.
+**Status:** works in the in-memory simulator and in tests (36 tests). It is **not yet wired into a running `llm-cluster` node**: nothing reads `History` frames off control connections, so a live node doesn't sync or save history yet. Takeover is a ranking, not consensus, and there is no restore-from-export command yet.
 
 ## Contents
 
