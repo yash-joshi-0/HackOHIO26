@@ -15,10 +15,7 @@ struct Header {
 }
 impl Header {
     fn raw<const N: usize>(&mut self) -> Result<[u8; N]> {
-        ensure!(
-            self.input.stream_position()? + N as u64 <= MAX_HEADER,
-            "GGUF header too large"
-        );
+        checked_header_end(self.input.stream_position()?, N as u64)?;
         let mut bytes = [0; N];
         self.input.read_exact(&mut bytes)?;
         Ok(bytes)
@@ -30,19 +27,14 @@ impl Header {
         Ok(u64::from_le_bytes(self.raw()?))
     }
     fn skip(&mut self, bytes: u64) -> Result<()> {
-        ensure!(
-            self.input
-                .stream_position()?
-                .checked_add(bytes)
-                .is_some_and(|n| n <= MAX_HEADER),
-            "GGUF header too large"
-        );
+        checked_header_end(self.input.stream_position()?, bytes)?;
         self.input.seek(SeekFrom::Current(bytes as i64))?;
         Ok(())
     }
     fn string(&mut self) -> Result<String> {
         let len = self.u64()?;
         ensure!(len <= 1024 * 1024, "GGUF string too long");
+        checked_header_end(self.input.stream_position()?, len)?;
         let mut bytes = vec![0; len as usize];
         self.input.read_exact(&mut bytes)?;
         Ok(String::from_utf8(bytes)?)
@@ -71,6 +63,15 @@ impl Header {
         }
     }
 }
+
+fn checked_header_end(position: u64, length: u64) -> Result<u64> {
+    let end = position
+        .checked_add(length)
+        .context("GGUF header too large")?;
+    ensure!(end <= MAX_HEADER, "GGUF header too large");
+    Ok(end)
+}
+
 pub(super) fn check_export(path: &Path, m: &Manifest, report: &ExportReport) -> Result<()> {
     let mut h = Header {
         input: BufReader::new(File::open(path)?),
@@ -192,4 +193,16 @@ pub(super) fn check_export(path: &Path, m: &Manifest, report: &ExportReport) -> 
         "export sidecar does not match physical GGUF tensors"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_limit_covers_string_payloads() {
+        assert_eq!(checked_header_end(MAX_HEADER - 8, 8).unwrap(), MAX_HEADER);
+        assert!(checked_header_end(MAX_HEADER - 7, 8).is_err());
+        assert!(checked_header_end(u64::MAX, 1).is_err());
+    }
 }
