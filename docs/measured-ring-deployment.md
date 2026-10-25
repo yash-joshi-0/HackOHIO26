@@ -5,6 +5,10 @@ from measured placement. It searches with the actual backend constraint: stage
 zero runs on the origin, followed by at least one remote stage. It keeps exact
 whole-range measurements and uses each peer at most once.
 
+The [version 2 evidence adapter](qualified-placement.md) adds separate
+range/capacity/link qualification and expiry checks, plus exact measured
+artifact/build binding. Its prepared envelope remains advisory.
+
 ```sh
 llm-cluster prepare-ring current-profile.json registry.json --output-dir prepared
 llm-cluster validate-ring prepared/bundle.json current-profile.json registry.json

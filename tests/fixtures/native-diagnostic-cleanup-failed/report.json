@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "native_candidate_diagnostic",
+  "profile_id": "fixture-profile-cleanup-001",
+  "status": "cleanup_failed",
+  "outcome_before_cleanup": "passed",
+  "cleanup_error": "OSError: fixture cleanup failure",
+  "started_at_unix_ms": 1761379200000,
+  "finished_at_unix_ms": 1761379215000,
+  "elapsed_seconds": 15.0,
+  "phase": "complete",
+  "eligible_for_placement": false,
+  "request": {"range": {"begin": 4, "end": 8}, "repetitions": 1},
+  "reference": {"kind": "fixture", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "tolerance": {"atol": 0.0001, "rtol": 0.0001},
+  "sessions": [
+    {
+      "repetition": 0,
+      "load_ms": 123.5,
+      "initialization": {"protocol": 1, "begin": 4, "end": 8, "layers": 8, "embd": 16, "vocab": 32, "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+      "execution_seconds": 12.25
+    }
+  ],
+  "completed_steps": 2,
+  "sequence_count": 1,
+  "reset": "fresh native process per repetition",
+  "counters": {"wire_bytes": 4096, "log_bytes": 512},
+  "summary": {
+    "prefill": {"compute": {"samples": 1, "p50_ms": 80.0, "p95_ms": 80.0, "max_ms": 80.0}, "service": {"samples": 1, "p50_ms": 82.0, "p95_ms": 82.0, "max_ms": 82.0}},
+    "decode": {"compute": {"samples": 1, "p50_ms": 4.5, "p95_ms": 4.5, "max_ms": 4.5}, "service": {"samples": 1, "p50_ms": 5.0, "p95_ms": 5.0, "max_ms": 5.0}}
+  },
+  "limitations": ["fixture has no independent qualification evidence"]
+}
