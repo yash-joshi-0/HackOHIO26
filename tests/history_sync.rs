@@ -78,6 +78,50 @@ fn duplicate_appends_are_idempotent() {
 }
 
 #[test]
+fn divergent_overlapping_append_requests_a_snapshot() {
+    let stored = vec![
+        Entry::JobStarted {
+            request_id: "job-0".to_owned(),
+            prompt: "original prompt".to_owned(),
+        },
+        Entry::OutputCommitted {
+            request_id: "job-0".to_owned(),
+            offset: 0,
+            text: "original".to_owned(),
+        },
+    ];
+    let mut replica = Replica::new(id(1));
+    assert!(matches!(
+        replica.handle(SyncMessage::Snapshot {
+            epoch: 1,
+            leader: id(0),
+            entries: stored.clone(),
+        }),
+        Some(SyncMessage::Ack { .. })
+    ));
+
+    let reply = replica.handle(SyncMessage::Append {
+        epoch: 1,
+        leader: id(0),
+        start: 0,
+        entries: vec![
+            stored[0].clone(),
+            Entry::OutputCommitted {
+                request_id: "job-0".to_owned(),
+                offset: 0,
+                text: "divergent".to_owned(),
+            },
+            Entry::JobCompleted {
+                request_id: "job-0".to_owned(),
+            },
+        ],
+    });
+
+    assert_eq!(reply, Some(SyncMessage::Resync { epoch: 1, len: 2 }));
+    assert_eq!(replica.history().entries(), stored);
+}
+
+#[test]
 fn delayed_snapshot_does_not_undo_a_later_append() {
     let mut leader = Leader::new(id(0), 1, Default::default(), [id(1)]);
     let mut replica = Replica::new(id(1));

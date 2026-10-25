@@ -350,8 +350,8 @@ The demo runs three jobs with one dropped message and a retransmit. Then the mai
 
 ## 8. Tests
 
-`tests/history_sync.rs` (17): sync, failover and election.
-- **Sync:** any number of nodes from 1 to 50; deltas after the first snapshot; repeated appends are harmless; dropped messages recovered; a gap triggers a snapshot.
+`tests/history_sync.rs` (18): sync, failover and election.
+- **Sync:** any number of nodes from 1 to 50; deltas after the first snapshot; matching repeated appends are harmless; divergent overlap and gaps trigger a snapshot; dropped messages are recovered.
 - **Failover:** continues from a worker's history (`EpochAdvanced` recorded); the most complete history wins; a stale main process is refused and resynced.
 - **Peers:** a disconnected peer stops being synced and catches up on rejoin; the leader's peer list follows `PeerTable`.
 - **Election and wire format:** the ranking is deterministic; longest-connected wins among equal histories; a newer history beats a longer, older one and the new epoch is above every epoch heard; epoch exhaustion fails closed; every session records its epoch; messages survive a round trip.

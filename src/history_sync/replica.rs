@@ -114,9 +114,18 @@ impl Replica {
                         len: self.len(),
                     });
                 }
-                // Skip entries we already have from a retransmission.
-                let skip = (self.len() - start) as usize;
-                self.history.extend(entries.into_iter().skip(skip));
+                // A retransmission may overlap entries already stored. Check that prefix
+                // before skipping it, or a divergent append could be acknowledged as current.
+                let existing = self.history.since(start);
+                let overlap = existing.len().min(entries.len());
+                if existing[..overlap] != entries[..overlap] {
+                    self.in_sync_epoch = false;
+                    return Some(SyncMessage::Resync {
+                        epoch,
+                        len: self.len(),
+                    });
+                }
+                self.history.extend(entries.into_iter().skip(overlap));
                 Some(self.ack())
             }
             SyncMessage::Reject { epoch } => {
