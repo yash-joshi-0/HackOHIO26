@@ -40,6 +40,8 @@ pub struct ArtifactCache {
     node: Option<crate::mesh::Node>,
     client: reqwest::Client,
     progress: Arc<watch::Sender<Option<Progress>>>,
+    /// Keeps the single progress channel scoped to one operation at a time.
+    operation: Arc<tokio::sync::Mutex<()>>,
 }
 impl ArtifactCache {
     pub async fn open(
@@ -68,8 +70,10 @@ impl ArtifactCache {
                 .read_timeout(Duration::from_secs(60))
                 .build()?,
             progress: Arc::new(watch::channel(None).0),
+            operation: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
+    /// Observe the serialized operation stream shared by this cache and its clones.
     pub fn progress(&self) -> watch::Receiver<Option<Progress>> {
         self.progress.subscribe()
     }
@@ -152,6 +156,10 @@ impl ArtifactCache {
             manifest.model == self.model,
             "artifact belongs to a different pinned model"
         );
+        let _operation = tokio::select! {
+            _ = cancel.cancelled() => bail!("artifact operation cancelled"),
+            operation = self.operation.lock() => operation,
+        };
         self.emit(manifest, Phase::Checking, 0);
         let result = self.ensure_locked(manifest, local, cancel).await;
         if result.is_err() {
@@ -390,4 +398,55 @@ pub(crate) async fn verify_file(
         path.display()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn cancellation_while_waiting_does_not_overwrite_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = ModelPin {
+            revision: "a".repeat(40),
+            source_sha256: "b".repeat(64),
+            source_bytes: 1,
+            architecture: "llama".into(),
+            layers: 1,
+        };
+        let cache = ArtifactCache::open(dir.path(), model.clone(), 1024, None)
+            .await
+            .unwrap();
+        let manifest = Manifest {
+            version: 1,
+            model,
+            begin: 0,
+            end: 1,
+            role: Role::Full,
+            bytes: 1,
+            artifact_sha256: "c".repeat(64),
+            export_report_sha256: "d".repeat(64),
+            location: Location::Https {
+                url: "https://seed.invalid/shard.gguf".into(),
+            },
+        };
+        let _guard = cache.operation.lock().await;
+        let cancel = CancellationToken::new();
+        let operation_cache = cache.clone();
+        let operation_cancel = cancel.clone();
+        let task = tokio::spawn(async move {
+            operation_cache
+                .ensure_artifact(&manifest, &operation_cancel)
+                .await
+        });
+
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+        assert!(cache.progress().borrow().is_none());
+    }
 }

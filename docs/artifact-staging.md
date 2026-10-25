@@ -31,6 +31,11 @@ let assigned_path = cache.ensure_artifact(assigned, &cancel).await?;
 // assignment are the same artifact, keep the retention until inference releases it.
 ```
 
+Calls through one `ArtifactCache` handle and its clones are serialized, so this
+single progress stream always describes one artifact operation. A canceled call
+waiting for that turn returns promptly without replacing the active operation's
+progress.
+
 `retain(hash, true, cancel)` must happen **before** staging an artifact that will
 be used by a profiler or worker. Retentions persist across restarts. The owner
 calls `retain(hash, false, cancel)` after the last consumer releases it. Retention
